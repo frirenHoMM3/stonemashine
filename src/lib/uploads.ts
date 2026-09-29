@@ -3,16 +3,14 @@ import path from "node:path";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import sharp from "sharp";
+import type { ImageSize } from "./uploads-url";
+
+export { mediaUrl } from "./uploads-url";
 
 export const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR ?? "./data/uploads");
 export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
-const SIZES = { lg: 1600, sm: 640 } as const;
-export type ImageSize = keyof typeof SIZES;
-
-export function mediaUrl(file: string, size: ImageSize = "lg") {
-  return `/media/${file}-${size}.webp`;
-}
+const SIZES: Record<ImageSize, number> = { lg: 1600, sm: 640 };
 
 // Перекодируем всё в webp: отрезает EXIF (геометки с телефона), чинит ориентацию,
 // и заодно отсекает всё, что не является картинкой.
