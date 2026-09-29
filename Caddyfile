@@ -1,0 +1,14 @@
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	request_body {
+		max_size 20MB
+	}
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+	}
+
+	reverse_proxy app:3000
+}
