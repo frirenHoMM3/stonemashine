@@ -7,6 +7,9 @@ const HINTS: Record<string, string> = {
   phone: "Как показывать: +7 900 000-00-00",
   avitoProfile: "https://www.avito.ru/user/…/profile",
   about: "Пара абзацев о магазине. Переносы строк сохраняются.",
+  yandexVerification: "webmaster.yandex.ru → Добавить сайт → Мета-тег. Можно вставить тег целиком",
+  googleVerification: "search.google.com/search-console → Тег HTML. Можно вставить тег целиком",
+  metrikaId: "metrika.yandex.ru → номер счётчика (только цифры). Вебвизор включится сам",
 };
 
 export function SettingsForm({ values, labels }: { values: Record<string, string>; labels: Record<string, string> }) {

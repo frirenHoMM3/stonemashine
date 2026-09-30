@@ -1,6 +1,6 @@
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl-arm64-openssl-3.0.x"]
 }
 
 datasource db {
@@ -35,12 +35,15 @@ model Product {
   carModel    String?
   yearFrom    Int?
   yearTo      Int?
-  condition   Condition      @default(USED)
-  price       Int?
-  oldPrice    Int?
-  avitoUrl    String
-  description String?
-  specs       Json           @default("[]")
+  condition     Condition      @default(USED)
+  conditionNote String?
+  price         Int?
+  oldPrice      Int?
+  priceNote     String?
+  avitoUrl      String?
+  description   String?
+  specs         Json           @default("[]")
+  sections      Json           @default("[]")
   inStock     Boolean        @default(true)
   featured    Boolean        @default(false)
   published   Boolean        @default(true)

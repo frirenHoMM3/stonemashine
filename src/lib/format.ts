@@ -20,10 +20,27 @@ export function formatYears(from?: number | null, to?: number | null) {
   return null;
 }
 
+export const conditionLabel = (p: { condition: Condition; conditionNote?: string | null }) =>
+  p.conditionNote || CONDITION_LABEL[p.condition];
+
+// Цена + свободная приписка: «от 5 000 ₽», «договорная», «за пару»
+export function priceLabel(p: { price: number | null; priceNote?: string | null }) {
+  if (p.price == null) return p.priceNote || "Цена по запросу";
+  return formatPrice(p.price);
+}
+
 export type Spec = { k: string; v: string };
 export function parseSpecs(json: unknown): Spec[] {
   if (!Array.isArray(json)) return [];
   return json.filter(
     (s): s is Spec => !!s && typeof s.k === "string" && typeof s.v === "string",
+  );
+}
+
+export type Section = { t: string; b: string };
+export function parseSections(json: unknown): Section[] {
+  if (!Array.isArray(json)) return [];
+  return json.filter(
+    (s): s is Section => !!s && typeof s.t === "string" && typeof s.b === "string",
   );
 }

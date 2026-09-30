@@ -10,7 +10,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   const admin = await requireAdmin();
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[240px_1fr]">
-      <aside className="sticky top-0 z-30 flex flex-col border-b border-line bg-coal lg:h-screen lg:border-b-0 lg:border-r">
+      <aside className="z-30 flex flex-col border-b border-line bg-coal lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r">
         <div className="flex h-16 items-center gap-3 border-line px-5 lg:border-b">
           <Mark className="h-7 w-7" />
           <span className="font-display text-lg font-extrabold uppercase tracking-[0.04em]">Админка</span>
@@ -27,7 +27,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
           </form>
         </div>
       </aside>
-      <div className="min-w-0 px-4 py-8 sm:px-8 lg:px-12 lg:py-10">{children}</div>
+      <div className="min-w-0 px-4 py-6 sm:px-8 lg:px-12 lg:py-10">{children}</div>
     </div>
   );
 }

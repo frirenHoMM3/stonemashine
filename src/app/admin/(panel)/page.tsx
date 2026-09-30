@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { formatPrice, CONDITION_LABEL } from "@/lib/format";
+import { conditionLabel, priceLabel } from "@/lib/format";
 import { mediaUrl } from "@/lib/uploads-url";
 import { deleteProduct, duplicateProduct, toggleProductFlag } from "../actions";
 import { ConfirmButton } from "@/components/admin/ui";
@@ -48,7 +48,7 @@ export default async function AdminProducts({ searchParams }: {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="label">Каталог</div>
-          <h1 className="h-display mt-2 text-5xl">Товары</h1>
+          <h1 className="h-display mt-2 text-4xl sm:text-5xl">Товары</h1>
         </div>
         <Link href="/admin/products/new" className="btn btn-red">
           <IconPlus /> Добавить товар
@@ -61,8 +61,8 @@ export default async function AdminProducts({ searchParams }: {
         </div>
       )}
 
-      <div className="mt-8 flex flex-wrap items-center gap-4 border-b border-line">
-        <div className="flex gap-1">
+      <div className="mt-6 flex flex-wrap items-center gap-x-4 border-b border-line sm:mt-8">
+        <div className="-mx-4 flex gap-1 overflow-x-auto whitespace-nowrap px-4 sm:mx-0 sm:px-0">
           {Object.entries(FILTERS).map(([k, v], i) => (
             <Link
               key={k}
@@ -75,7 +75,7 @@ export default async function AdminProducts({ searchParams }: {
             </Link>
           ))}
         </div>
-        <form className="relative ml-auto w-full pb-3 sm:w-72">
+        <form className="relative order-first w-full pb-3 sm:order-none sm:ml-auto sm:w-72">
           <input type="hidden" name="f" value={f} />
           <IconSearch className="pointer-events-none absolute left-3 top-[13px] text-smoke" width={16} />
           <input name="q" defaultValue={q} placeholder="Название, артикул, марка" className="field h-10 pl-9 text-sm" />
@@ -92,8 +92,8 @@ export default async function AdminProducts({ searchParams }: {
       ) : (
         <ul className="mt-2 divide-y divide-line">
           {products.map((p) => (
-            <li key={p.id} className="group flex flex-wrap items-center gap-4 py-4 md:flex-nowrap">
-              <Link href={`/admin/products/${p.id}`} className="h-16 w-20 shrink-0 overflow-hidden border border-line bg-steel">
+            <li key={p.id} className="group flex flex-wrap items-center gap-x-3 gap-y-3 py-4 sm:gap-4 lg:flex-nowrap">
+              <Link href={`/admin/products/${p.id}`} className="h-14 w-16 shrink-0 overflow-hidden border border-line bg-steel sm:h-16 sm:w-20">
                 {p.images[0] ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={mediaUrl(p.images[0].file, "sm")} alt="" className="h-full w-full object-cover" />
@@ -110,20 +110,20 @@ export default async function AdminProducts({ searchParams }: {
                   {p.sku && <span>арт. {p.sku}</span>}
                   {p.carMake && <span>{[p.carMake, p.carModel].filter(Boolean).join(" ")}</span>}
                   {p.category && <span>{p.category.name}</span>}
-                  <span>{CONDITION_LABEL[p.condition]}</span>
+                  <span>{conditionLabel(p)}</span>
                   <span>{p.views} просм.</span>
                 </div>
               </div>
 
-              <div className="w-32 shrink-0 text-right font-display text-lg font-bold">{formatPrice(p.price)}</div>
+              <div className="shrink-0 text-right font-display text-lg font-bold lg:w-32">{priceLabel(p)}</div>
 
-              <div className="flex shrink-0 gap-1">
+              <div className="flex shrink-0 gap-1 max-lg:basis-full">
                 <Flag id={p.id} flag="published" on={p.published} labels={["На сайте", "Скрыт"]} />
                 <Flag id={p.id} flag="inStock" on={p.inStock} labels={["В наличии", "Нет"]} />
                 <Flag id={p.id} flag="featured" on={p.featured} labels={["★", "☆"]} title="Показывать первым на главной" />
               </div>
 
-              <div className="flex shrink-0 gap-1">
+              <div className="flex shrink-0 gap-1 max-lg:basis-full max-lg:[&>*]:flex-1 max-lg:[&_.btn]:w-full">
                 {p.published && (
                   <Link href={`/catalog/${p.slug}`} target="_blank" className="btn btn-ghost btn-sm px-3" title="Открыть на сайте">
                     <IconExternal width={14} />

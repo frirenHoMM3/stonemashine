@@ -9,7 +9,6 @@ import { AutoSubmit } from "@/components/AutoSubmit";
 import { IconSearch } from "@/components/icons";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Каталог" };
 
 const PER_PAGE = 24;
 const SORTS = {
@@ -21,6 +20,32 @@ const SORTS = {
 type SP = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)?.trim() || "";
 const int = (v: string) => (/^\d{1,9}$/.test(v) ? Number(v) : undefined);
+
+export async function generateMetadata({ searchParams }: { searchParams: Promise<SP> }): Promise<Metadata> {
+  const sp = await searchParams;
+  const cat = one(sp.cat);
+  const make = one(sp.make);
+  const page = int(one(sp.page)) ?? 1;
+  const catName = cat ? (await db.category.findUnique({ where: { slug: cat }, select: { name: true } }))?.name : null;
+
+  const head = [catName, make].filter(Boolean).join(" ");
+  const title = head ? `${head} — запчасти в наличии` : "Каталог автозапчастей";
+  // Индексируем только «чистые» страницы: категория, марка, пагинация.
+  // Поиск, цена, сортировка и прочие комбинации — дубли, их закрываем.
+  const noisy = ["q", "model", "cond", "min", "max", "stock", "sort"].some((k) => one(sp[k]));
+  const canon = new URLSearchParams();
+  if (cat) canon.set("cat", cat);
+  if (make) canon.set("make", make);
+  if (page > 1) canon.set("page", String(page));
+  const qs = canon.toString();
+
+  return {
+    title: page > 1 ? `${title}, стр. ${page}` : title,
+    description: `${head || "Автозапчасти"}: фото, цены, OEM-номера. Б/у, контрактные и новые детали, покупка через Авито.`,
+    alternates: { canonical: `/catalog${qs ? `?${qs}` : ""}` },
+    robots: noisy ? { index: false, follow: true } : undefined,
+  };
+}
 
 export default async function Catalog({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
@@ -60,7 +85,7 @@ export default async function Catalog({ searchParams }: { searchParams: Promise<
       skip: (page - 1) * PER_PAGE,
       take: PER_PAGE,
       select: {
-        slug: true, title: true, price: true, oldPrice: true, condition: true, carMake: true,
+        slug: true, title: true, price: true, oldPrice: true, priceNote: true, condition: true, conditionNote: true, carMake: true,
         carModel: true, yearFrom: true, yearTo: true, sku: true, inStock: true,
         images: { select: { file: true }, orderBy: { sortOrder: "asc" }, take: 1 },
       },
@@ -85,18 +110,18 @@ export default async function Catalog({ searchParams }: { searchParams: Promise<
   const catName = categories.find((c) => c.slug === cat)?.name;
 
   return (
-    <div className="wrap pt-10 md:pt-14">
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-6">
+    <div className="wrap pt-6 md:pt-14">
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-line pb-4 md:pb-6">
         <div>
           <div className="label">Каталог</div>
-          <h1 className="h-display mt-3 text-5xl md:text-7xl">{catName ?? (q ? `«${q}»` : "Все запчасти")}</h1>
+          <h1 className="h-display mt-2 break-words text-4xl md:mt-3 md:text-7xl">{catName ?? (make || (q ? `«${q}»` : "Все запчасти"))}</h1>
         </div>
         <div className="font-mono text-sm text-ash">
           Найдено: <span className="text-bone">{total}</span>
         </div>
       </div>
 
-      <div className="mt-8 grid gap-10 lg:grid-cols-[280px_1fr]">
+      <div className="mt-4 grid grid-cols-1 gap-5 md:mt-8 lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-10">
         {/* ——— ФИЛЬТРЫ ——— */}
         <aside>
           <input id="filters-toggle" type="checkbox" className="peer sr-only" defaultChecked={activeFilters > 0} />
@@ -152,13 +177,13 @@ export default async function Catalog({ searchParams }: { searchParams: Promise<
         </aside>
 
         {/* ——— СПИСОК ——— */}
-        <div>
-          <div className="mb-5 flex flex-wrap gap-x-6 gap-y-2 font-display text-sm font-bold uppercase tracking-[0.08em]">
+        <div className="min-w-0">
+          <div className="-mx-4 mb-4 flex gap-5 overflow-x-auto whitespace-nowrap px-4 pb-1 font-display text-sm font-bold uppercase tracking-[0.08em] sm:mx-0 sm:px-0 md:mb-5 md:gap-6">
             {Object.entries(SORTS).map(([k, v]) => (
               <Link
                 key={k}
                 href={href({ sort: k as keyof typeof SORTS, page: 1 })}
-                className={k === sort ? "text-bone underline decoration-red decoration-2 underline-offset-8" : "text-smoke hover:text-ash"}
+                className={`py-1 ${k === sort ? "text-bone underline decoration-red decoration-2 underline-offset-8" : "text-smoke hover:text-ash"}`}
               >
                 {v.label}
               </Link>
@@ -166,7 +191,7 @@ export default async function Catalog({ searchParams }: { searchParams: Promise<
           </div>
 
           {products.length ? (
-            <Reveal key={JSON.stringify(current) + page} className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" step={45}>
+            <Reveal key={JSON.stringify(current) + page} className="grid grid-cols-2 gap-2 sm:gap-4 xl:grid-cols-3" step={45}>
               {products.map((p, i) => <ProductCard key={p.slug} p={p} index={i} />)}
             </Reveal>
           ) : (

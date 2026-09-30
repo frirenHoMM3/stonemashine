@@ -12,6 +12,7 @@ import { deleteImage } from "@/lib/uploads";
 import { slugify } from "@/lib/slug";
 import { CONDITIONS } from "@/lib/format";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settings";
+import { pingIndexNow } from "@/lib/indexnow";
 
 export type FormState = { error?: string; fieldErrors?: Record<string, string>; ok?: string } | undefined;
 
@@ -80,12 +81,19 @@ export async function logoutEverywhere() {
 
 const optStr = (max: number) =>
   z.string().trim().max(max).transform((v) => v || null);
-const optInt = (min: number, max: number) =>
+// Число пишут как угодно: «12 500», «12500 ₽», «12.500», «12 500,50 руб» — понимаем всё
+function looseNumber(raw: string) {
+  const v = raw.replace(/[\s\u00a0'’]/g, "").replace(/(₽|руб\.?|р\.?|rub|г\.?|год[а-я]*)$/i, "");
+  if (/^\d{1,3}([.,]\d{3})+$/.test(v)) return Number(v.replace(/[.,]/g, ""));
+  if (/^\d+([.,]\d+)?$/.test(v)) return Math.round(Number(v.replace(",", ".")));
+  return NaN;
+}
+const optInt = (min: number, max: number, hint: string) =>
   z.string().trim().transform((v, ctx) => {
     if (!v) return null;
-    const n = Number(v.replace(/\s/g, ""));
-    if (!Number.isInteger(n) || n < min || n > max) {
-      ctx.addIssue({ code: "custom", message: `Целое число ${min}–${max}` });
+    const n = looseNumber(v);
+    if (!Number.isFinite(n) || n < min || n > max) {
+      ctx.addIssue({ code: "custom", message: hint });
       return z.NEVER;
     }
     return n;
@@ -96,33 +104,41 @@ const ImageSchema = z.object({
   width: z.number().int().positive(),
   height: z.number().int().positive(),
 });
-const SpecSchema = z.object({ k: z.string().trim().max(80), v: z.string().trim().max(300) });
+const SpecSchema = z.object({ k: z.string().trim().max(200), v: z.string().trim().max(2000) });
+const SectionSchema = z.object({ t: z.string().trim().max(200), b: z.string().trim().max(20_000) });
 
 const ProductSchema = z.object({
-  title: z.string().trim().min(3, "Минимум 3 символа").max(160),
-  slug: z.string().trim().max(90),
+  title: z.string().trim().min(1, "Нужно название").max(300),
+  slug: z.string().trim().max(120),
+  // Любая ссылка — Авито, Дром, свой мессенджер. Только http(s): javascript: и прочее не пускаем
   avitoUrl: z
     .string()
     .trim()
-    .url("Нужна полная ссылка")
-    .refine((u) => /^https:\/\/([a-z0-9-]+\.)*avito\.ru\//i.test(u), "Ссылка должна вести на avito.ru"),
-  sku: optStr(80),
-  oem: optStr(120),
-  brand: optStr(80),
-  carMake: optStr(60),
-  carModel: optStr(80),
-  yearFrom: optInt(1950, 2100),
-  yearTo: optInt(1950, 2100),
-  price: optInt(0, 100_000_000),
-  oldPrice: optInt(0, 100_000_000),
+    .max(2000)
+    .transform((v) => (v && !/^https?:\/\//i.test(v) && /^[\w-]+(\.[\w-]+)+/.test(v) ? `https://${v}` : v))
+    .refine((v) => !v || /^https?:\/\/[^\s]+$/i.test(v), "Ссылка должна начинаться с http:// или https://")
+    .transform((v) => v || null),
+  sku: optStr(200),
+  oem: optStr(500),
+  brand: optStr(200),
+  carMake: optStr(100),
+  carModel: optStr(200),
+  yearFrom: optInt(1900, 2100, "Год: 1900–2100"),
+  yearTo: optInt(1900, 2100, "Год: 1900–2100"),
+  price: optInt(0, 1_000_000_000, "Только число. Пояснение — в поле «к цене»"),
+  oldPrice: optInt(0, 1_000_000_000, "Только число"),
+  priceNote: optStr(120),
   condition: z.enum(CONDITIONS as [string, ...string[]]),
+  conditionNote: optStr(120),
   categoryId: optStr(40),
-  description: optStr(10_000),
+  categoryNew: z.string().trim().max(60),
+  description: optStr(50_000),
   inStock: z.boolean(),
   featured: z.boolean(),
   published: z.boolean(),
-  images: z.array(ImageSchema).max(30, "Не больше 30 фото"),
-  specs: z.array(SpecSchema).max(60),
+  images: z.array(ImageSchema).max(60, "Не больше 60 фото"),
+  specs: z.array(SpecSchema).max(200),
+  sections: z.array(SectionSchema).max(30),
 });
 
 function parseJson(v: FormDataEntryValue | null) {
@@ -143,6 +159,15 @@ async function uniqueSlug(base: string, exceptId?: string) {
   return `${root}-${Date.now().toString(36)}`;
 }
 
+async function uniqueCategorySlug(name: string) {
+  const root = slugify(name) || "cat";
+  for (let i = 0; i < 50; i++) {
+    const candidate = i ? `${root}-${i + 1}` : root;
+    if (!(await db.category.findUnique({ where: { slug: candidate } }))) return candidate;
+  }
+  return `${root}-${Date.now().toString(36)}`;
+}
+
 export async function saveProduct(id: string | null, _: FormState, fd: FormData): Promise<FormState> {
   await requireAdmin();
 
@@ -159,14 +184,18 @@ export async function saveProduct(id: string | null, _: FormState, fd: FormData)
     yearTo: fd.get("yearTo") ?? "",
     price: fd.get("price") ?? "",
     oldPrice: fd.get("oldPrice") ?? "",
+    priceNote: fd.get("priceNote") ?? "",
     condition: fd.get("condition") ?? "USED",
+    conditionNote: fd.get("conditionNote") ?? "",
     categoryId: fd.get("categoryId") ?? "",
+    categoryNew: fd.get("categoryNew") ?? "",
     description: fd.get("description") ?? "",
     inStock: fd.get("inStock") === "on",
     featured: fd.get("featured") === "on",
     published: fd.get("published") === "on",
     images: parseJson(fd.get("images")),
     specs: parseJson(fd.get("specs")),
+    sections: parseJson(fd.get("sections")),
   });
 
   if (!parsed.success) {
@@ -178,19 +207,29 @@ export async function saveProduct(id: string | null, _: FormState, fd: FormData)
     return { error: "Проверьте поля формы", fieldErrors };
   }
 
-  const { images, specs, slug: rawSlug, ...data } = parsed.data;
+  const { images, specs, sections, categoryNew, slug: rawSlug, ...data } = parsed.data;
+  // Годы перепутали местами — просто меняем, а не ругаемся
   if (data.yearFrom && data.yearTo && data.yearFrom > data.yearTo) {
-    return { error: "Проверьте поля формы", fieldErrors: { yearTo: "«По» меньше, чем «с»" } };
+    [data.yearFrom, data.yearTo] = [data.yearTo, data.yearFrom];
   }
-  if (data.categoryId && !(await db.category.findUnique({ where: { id: data.categoryId } }))) {
+  // Новая категория прямо из карточки: находим по имени или создаём
+  if (categoryNew) {
+    const existing = await db.category.findFirst({ where: { name: { equals: categoryNew, mode: "insensitive" } } });
+    const cat = existing ?? (await db.category.create({
+      data: { name: categoryNew, slug: await uniqueCategorySlug(categoryNew) },
+    }));
+    data.categoryId = cat.id;
+  } else if (data.categoryId && !(await db.category.findUnique({ where: { id: data.categoryId } }))) {
     data.categoryId = null;
   }
 
   const slug = await uniqueSlug(rawSlug || data.title, id ?? undefined);
-  const cleanSpecs = specs.filter((s) => s.k && s.v);
+  const cleanSpecs = specs.filter((s) => s.k || s.v);
+  const cleanSections = sections.filter((x) => x.t || x.b);
   const imageRows = images.map((img, i) => ({ ...img, sortOrder: i }));
 
   let removedFiles: string[] = [];
+  const oldSlug = id ? (await db.product.findUnique({ where: { id }, select: { slug: true } }))?.slug : null;
   try {
     if (id) {
       const old = await db.productImage.findMany({ where: { productId: id }, select: { file: true } });
@@ -200,7 +239,7 @@ export async function saveProduct(id: string | null, _: FormState, fd: FormData)
       await db.$transaction([
         db.product.update({
           where: { id },
-          data: { ...data, condition: data.condition as never, slug, specs: cleanSpecs },
+          data: { ...data, condition: data.condition as never, slug, specs: cleanSpecs, sections: cleanSections },
         }),
         db.productImage.deleteMany({ where: { productId: id } }),
         db.productImage.createMany({ data: imageRows.map((r) => ({ ...r, productId: id })) }),
@@ -212,6 +251,7 @@ export async function saveProduct(id: string | null, _: FormState, fd: FormData)
           condition: data.condition as never,
           slug,
           specs: cleanSpecs,
+          sections: cleanSections,
           images: { create: imageRows },
         },
       });
@@ -225,6 +265,7 @@ export async function saveProduct(id: string | null, _: FormState, fd: FormData)
 
   await Promise.all(removedFiles.map(deleteImage));
   revalidatePath("/", "layout");
+  pingIndexNow([`/catalog/${slug}`, ...(oldSlug && oldSlug !== slug ? [`/catalog/${oldSlug}`] : []), "/catalog"]);
   redirect(`/admin?saved=${encodeURIComponent(data.title)}`);
 }
 
@@ -232,7 +273,8 @@ export async function deleteProduct(fd: FormData) {
   await requireAdmin();
   const id = String(fd.get("id"));
   const images = await db.productImage.findMany({ where: { productId: id }, select: { file: true } });
-  await db.product.delete({ where: { id } }).catch(() => {});
+  const gone = await db.product.delete({ where: { id }, select: { slug: true } }).catch(() => null);
+  if (gone) pingIndexNow([`/catalog/${gone.slug}`]);
   await Promise.all(images.map((i) => deleteImage(i.file)));
   revalidatePath("/", "layout");
 }
@@ -245,20 +287,22 @@ export async function toggleProductFlag(fd: FormData) {
   const p = await db.product.findUnique({ where: { id }, select: { published: true, inStock: true, featured: true } });
   if (!p) return;
   const key = flag as keyof typeof p;
-  await db.product.update({ where: { id }, data: { [key]: !p[key] } });
+  const updated = await db.product.update({ where: { id }, data: { [key]: !p[key] }, select: { slug: true } });
   revalidatePath("/", "layout");
+  if (key !== "featured") pingIndexNow([`/catalog/${updated.slug}`]);
 }
 
 export async function duplicateProduct(fd: FormData) {
   await requireAdmin();
   const src = await db.product.findUnique({ where: { id: String(fd.get("id")) } });
   if (!src) return;
-  const { id: _id, slug: _slug, createdAt: _c, updatedAt: _u, views: _v, specs, ...rest } = src;
+  const { id: _id, slug: _slug, createdAt: _c, updatedAt: _u, views: _v, specs, sections, ...rest } = src;
   // Фото не копируем: файлы общие, удаление одного товара снесло бы их у второго
   const copy = await db.product.create({
     data: {
       ...rest,
       specs: specs ?? [],
+      sections: sections ?? [],
       title: `${src.title} (копия)`,
       slug: await uniqueSlug(`${src.title}-kopiya`),
       published: false,
@@ -304,7 +348,12 @@ export async function saveSettings(_: FormState, fd: FormData): Promise<FormStat
   for (const key of Object.keys(SETTING_KEYS) as SettingKey[]) {
     let v = String(fd.get(key) ?? "").trim().slice(0, key === "about" ? 4000 : 300);
     if (key === "telegram") v = v.replace(/^@|^https?:\/\/t\.me\//, "");
-    if (key === "whatsapp") v = v.replace(/\D/g, "");
+    if (key === "whatsapp" || key === "metrikaId") v = v.replace(/\D/g, "");
+    // Вебмастер выдаёт готовый <meta ... content="КОД">: принимаем и тег целиком, и сам код
+    if (key === "yandexVerification" || key === "googleVerification") {
+      v = /content=["']([^"']+)["']/.exec(v)?.[1] ?? v;
+      if (v && !/^[\w-]{6,100}$/.test(v)) fieldErrors[key] = "Вставьте код или meta-тег целиком";
+    }
     if (key === "shopName" && !v) fieldErrors[key] = "Не может быть пустым";
     if (v && URL_KEYS.includes(key) && !/^https:\/\//.test(v)) fieldErrors[key] = "Нужна ссылка, начинающаяся с https://";
     if (key === "telegram" && v && !/^[A-Za-z0-9_]{4,32}$/.test(v)) fieldErrors[key] = "Только username, например stonemachine_parts";

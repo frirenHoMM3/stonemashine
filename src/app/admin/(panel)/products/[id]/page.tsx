@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
-import { parseSpecs } from "@/lib/format";
+import { parseSections, parseSpecs } from "@/lib/format";
 import { productFormLookups } from "@/lib/admin-data";
 import { ProductForm } from "@/components/admin/ProductForm";
 
@@ -29,13 +29,15 @@ export default async function EditProduct({ params }: { params: Promise<{ id: st
       <ProductForm
         {...lookups}
         p={{
-          id: p.id, title: p.title, slug: p.slug, avitoUrl: p.avitoUrl, sku: s(p.sku), oem: s(p.oem),
+          id: p.id, title: p.title, slug: p.slug, avitoUrl: s(p.avitoUrl), sku: s(p.sku), oem: s(p.oem),
           brand: s(p.brand), carMake: s(p.carMake), carModel: s(p.carModel), yearFrom: s(p.yearFrom),
-          yearTo: s(p.yearTo), price: s(p.price), oldPrice: s(p.oldPrice), condition: p.condition,
+          yearTo: s(p.yearTo), price: s(p.price), oldPrice: s(p.oldPrice), priceNote: s(p.priceNote),
+          condition: p.condition, conditionNote: s(p.conditionNote),
           categoryId: s(p.categoryId), description: s(p.description), inStock: p.inStock,
           featured: p.featured, published: p.published,
           images: p.images.map(({ file, width, height }) => ({ file, width, height })),
           specs: parseSpecs(p.specs),
+          sections: parseSections(p.sections),
         }}
       />
     </div>

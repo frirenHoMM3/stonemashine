@@ -2,19 +2,20 @@
 import Link from "next/link";
 import { useState } from "react";
 import { saveProduct } from "@/app/admin/actions";
-import { CONDITIONS, CONDITION_LABEL, type Spec } from "@/lib/format";
+import { CONDITIONS, CONDITION_LABEL, type Section, type Spec } from "@/lib/format";
 import { slugify } from "@/lib/slug";
 import { Field, FormMessage, PendingButton, Toggle, useKeepForm } from "./ui";
 import { ImageManager, type Img } from "./ImageManager";
 import { SpecsEditor } from "./SpecsEditor";
+import { SectionsEditor } from "./SectionsEditor";
 
 export type ProductFormData = {
   id: string | null;
   title: string; slug: string; avitoUrl: string; sku: string; oem: string; brand: string;
   carMake: string; carModel: string; yearFrom: string; yearTo: string; price: string; oldPrice: string;
-  condition: string; categoryId: string; description: string;
+  priceNote: string; condition: string; conditionNote: string; categoryId: string; description: string;
   inStock: boolean; featured: boolean; published: boolean;
-  images: Img[]; specs: Spec[];
+  images: Img[]; specs: Spec[]; sections: Section[];
 };
 
 export function ProductForm({ p, categories, makes, models }: {
@@ -28,10 +29,11 @@ export function ProductForm({ p, categories, makes, models }: {
   const [title, setTitle] = useState(p.title);
   const [slugTouched, setSlugTouched] = useState(!!p.id);
   const [slug, setSlug] = useState(p.slug);
+  const [categoryId, setCategoryId] = useState(p.categoryId);
   const e = state?.fieldErrors ?? {};
 
   return (
-    <form onSubmit={onSubmit} className="grid gap-10 xl:grid-cols-[1fr_340px]">
+    <form onSubmit={onSubmit} className="grid gap-8 pb-24 xl:grid-cols-[1fr_340px] xl:gap-10 xl:pb-0">
       <div className="space-y-10">
         <FormMessage state={state} />
 
@@ -45,34 +47,46 @@ export function ProductForm({ p, categories, makes, models }: {
                 if (!slugTouched) setSlug(slugify(ev.target.value));
               }}
               required
-              maxLength={160}
+              maxLength={300}
               placeholder="Фара передняя левая LED"
               className="field text-lg"
             />
           </Field>
-          <Field label="Ссылка на объявление Авито *" error={e.avitoUrl}>
-            <input name="avitoUrl" type="url" defaultValue={p.avitoUrl} required placeholder="https://www.avito.ru/..." className="field font-mono text-sm" />
+          <Field label="Ссылка «Купить»" error={e.avitoUrl} hint="Авито, Дром, мессенджер — любая. Пусто — вместо кнопки покупки будут контакты">
+            <input name="avitoUrl" defaultValue={p.avitoUrl} placeholder="https://www.avito.ru/..." className="field font-mono text-sm" />
           </Field>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Цена, ₽" error={e.price} hint="Пусто — «цена по запросу»">
-              <input name="price" inputMode="numeric" defaultValue={p.price} className="field font-mono" placeholder="12500" />
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Цена, ₽" error={e.price} hint="Можно «12 500 ₽»">
+              <input name="price" inputMode="decimal" defaultValue={p.price} className="field font-mono" placeholder="12500" />
             </Field>
-            <Field label="Старая цена, ₽" error={e.oldPrice} hint="Показывается зачёркнутой, если больше цены">
-              <input name="oldPrice" inputMode="numeric" defaultValue={p.oldPrice} className="field font-mono" />
+            <Field label="Старая цена, ₽" error={e.oldPrice} hint="Зачёркнутая">
+              <input name="oldPrice" inputMode="decimal" defaultValue={p.oldPrice} className="field font-mono" />
+            </Field>
+            <Field label="К цене" error={e.priceNote} hint="«за пару», «договорная»">
+              <input name="priceNote" defaultValue={p.priceNote} maxLength={120} className="field" />
             </Field>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Состояние">
+            <Field label="Состояние" hint="Для фильтров и поисковиков">
               <select name="condition" defaultValue={p.condition} className="field">
                 {CONDITIONS.map((c) => <option key={c} value={c}>{CONDITION_LABEL[c]}</option>)}
               </select>
             </Field>
-            <Field label="Категория" hint={categories.length ? undefined : "Категории создаются в разделе «Категории»"}>
-              <select name="categoryId" defaultValue={p.categoryId} className="field">
+            <Field label="Своя подпись состояния" error={e.conditionNote} hint="Покажется вместо стандартной">
+              <input name="conditionNote" defaultValue={p.conditionNote} maxLength={120} placeholder="Б/у, отличное" className="field" />
+            </Field>
+            <Field label="Категория">
+              <select name="categoryId" value={categoryId} onChange={(ev) => setCategoryId(ev.target.value)} className="field">
                 <option value="">— без категории —</option>
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                <option value="__new">+ Новая категория…</option>
               </select>
             </Field>
+            {categoryId === "__new" && (
+              <Field label="Название новой категории">
+                <input name="categoryNew" autoFocus maxLength={60} placeholder="Например, «Салон»" className="field" />
+              </Field>
+            )}
           </div>
         </Section>
 
@@ -109,13 +123,17 @@ export function ProductForm({ p, categories, makes, models }: {
         </Section>
 
         <Section n="04" title="Описание">
-          <Field label="Текст" error={e.description} hint="Состояние, дефекты, что в комплекте. Переносы строк сохраняются.">
-            <textarea name="description" rows={8} defaultValue={p.description} maxLength={10000} className="field" />
+          <Field label="Текст" error={e.description} hint="Пишите как угодно. «- » в начале строки — список, **текст** — жирный, ссылки кликабельны">
+            <textarea name="description" rows={8} defaultValue={p.description} maxLength={50000} className="field min-h-40 [field-sizing:content]" />
           </Field>
         </Section>
 
         <Section n="05" title="Характеристики">
           <SpecsEditor initial={p.specs} />
+        </Section>
+
+        <Section n="06" title="Свои разделы">
+          <SectionsEditor initial={p.sections} />
         </Section>
       </div>
 
@@ -136,7 +154,8 @@ export function ProductForm({ p, categories, makes, models }: {
             className="field font-mono text-sm"
           />
         </Field>
-        <div className="flex gap-2 pt-2">
+        {/* На мобилке кнопки прилипают к низу экрана — длинную форму не надо листать до конца */}
+        <div className="fixed inset-x-0 bottom-0 z-30 flex gap-2 border-t border-line bg-ink/95 p-3 backdrop-blur-md [padding-bottom:max(0.75rem,env(safe-area-inset-bottom))] xl:static xl:border-0 xl:bg-transparent xl:p-0 xl:pt-2 xl:backdrop-blur-none">
           {uploading ? (
             <button disabled className="btn btn-red flex-1">Фото загружаются…</button>
           ) : (

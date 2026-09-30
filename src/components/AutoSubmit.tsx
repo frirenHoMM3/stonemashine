@@ -17,8 +17,16 @@ export function AutoSubmit() {
         form.requestSubmit();
       }
     };
+    // Пустые поля не тащим в URL: /catalog?make=BMW вместо /catalog?q=&make=BMW&min=&max=…
+    const clean = (e: FormDataEvent) => {
+      for (const [k, v] of [...e.formData.entries()]) if (v === "") e.formData.delete(k);
+    };
     form.addEventListener("change", on);
-    return () => form.removeEventListener("change", on);
+    form.addEventListener("formdata", clean);
+    return () => {
+      form.removeEventListener("change", on);
+      form.removeEventListener("formdata", clean);
+    };
   }, []);
   return <span ref={ref} hidden />;
 }

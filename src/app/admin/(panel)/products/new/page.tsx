@@ -14,8 +14,8 @@ export default async function NewProduct() {
         {...lookups}
         p={{
           id: null, title: "", slug: "", avitoUrl: "", sku: "", oem: "", brand: "", carMake: "", carModel: "",
-          yearFrom: "", yearTo: "", price: "", oldPrice: "", condition: "USED", categoryId: "", description: "",
-          inStock: true, featured: false, published: true, images: [], specs: [],
+          yearFrom: "", yearTo: "", price: "", oldPrice: "", priceNote: "", condition: "USED", conditionNote: "",
+          categoryId: "", description: "", inStock: true, featured: false, published: true, images: [], specs: [], sections: [],
         }}
       />
     </div>

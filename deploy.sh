@@ -10,7 +10,13 @@ set -euo pipefail
 
 APP_DIR="/opt/stonemachine"
 RESET_ADMIN=0
-[[ "${1:-}" == "--reset-admin" ]] && RESET_ADMIN=1
+for arg in "$@"; do
+  case "$arg" in
+    --reset-admin) RESET_ADMIN=1 ;;
+    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    *) echo "Неизвестный параметр: $arg (см. --help)"; exit 1 ;;
+  esac
+done
 
 cd "$(dirname "$0")"
 
@@ -18,6 +24,10 @@ red()  { printf '\033[31m%s\033[0m\n' "$*"; }
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 step() { printf '\n\033[31m▌\033[0m \033[1m%s\033[0m\n' "$*"; }
 die()  { red "✘ $*"; exit 1; }
+rand_hex() { openssl rand -hex "$1" 2>/dev/null || od -An -tx1 -N "$1" /dev/urandom | tr -d ' \n'; }
+
+for bin in ssh tar; do command -v "$bin" >/dev/null || die "Не найдена программа $bin"; done
+[[ -f docker-compose.yml && -f Dockerfile ]] || die "Запускайте из папки проекта"
 
 # ——— ввод ———
 bold "STONEMACHINE — деплой"
@@ -32,7 +42,8 @@ echo
 
 # ——— одно SSH-соединение на весь деплой ———
 # Пароль отдаём ssh через SSH_ASKPASS: не нужен sshpass, пароль не светится в аргументах процессов.
-WORK="$(mktemp -d)"
+# Короткий путь: у unix-сокета SSH лимит ~100 символов
+WORK="$(mktemp -d /tmp/smdeploy.XXXXXX)"
 CTL="$WORK/ctl"
 cleanup() {
   ssh -S "$CTL" -O exit "$SSH_USER@$HOST" >/dev/null 2>&1 || true
@@ -44,6 +55,7 @@ SSH_OPTS=(-p "$SSH_PORT" -o ControlPath="$CTL" -o StrictHostKeyChecking=accept-n
 
 step "Подключаюсь к $SSH_USER@$HOST:$SSH_PORT"
 if [[ -n "$SSH_PASS" ]]; then
+  # shellcheck disable=SC2016  # $DEPLOY_SSH_PASS должен раскрыться в askpass, а не здесь
   printf '#!/bin/sh\nprintf "%%s\\n" "$DEPLOY_SSH_PASS"\n' > "$WORK/askpass"
   chmod 700 "$WORK/askpass"
   DEPLOY_SSH_PASS="$SSH_PASS" SSH_ASKPASS="$WORK/askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 \
@@ -56,6 +68,7 @@ else
 fi
 unset SSH_PASS
 
+# shellcheck disable=SC2029  # команды намеренно собираются локально
 remote() { ssh "${SSH_OPTS[@]}" "$SSH_USER@$HOST" "$@"; }
 
 SUDO=""
@@ -70,10 +83,22 @@ step "Проверяю Docker на сервере"
 if remote "command -v docker >/dev/null && $SUDO docker compose version >/dev/null 2>&1"; then
   echo "  уже установлен"
 else
-  echo "  ставлю Docker (официальный скрипт get.docker.com)…"
-  remote "curl -fsSL https://get.docker.com | $SUDO sh" >/dev/null || die "Не удалось установить Docker"
-  remote "$SUDO systemctl enable --now docker" >/dev/null
+  echo "  ставлю Docker (официальный скрипт get.docker.com), 1–3 минуты…"
+  remote "command -v curl >/dev/null || { $SUDO apt-get update -qq && $SUDO apt-get install -y -qq curl ca-certificates; }" >/dev/null 2>&1 \
+    || die "На сервере нет curl и не получилось его поставить (нужен Debian/Ubuntu)"
+  remote "curl -fsSL https://get.docker.com | $SUDO sh" >/dev/null 2>&1 || die "Не удалось установить Docker"
+  remote "$SUDO systemctl enable --now docker" >/dev/null 2>&1 || true
   echo "  ok"
+fi
+
+# ——— память ———
+# Сборка Next.js съедает ~1.5 ГБ. На дешёвых VPS с 1 ГБ без swap она просто падает.
+MEM_MB=$(remote "awk '/MemTotal/ {print int(\$2/1024)}' /proc/meminfo")
+SWAP_MB=$(remote "awk '/SwapTotal/ {print int(\$2/1024)}' /proc/meminfo")
+if (( MEM_MB + SWAP_MB < 2500 )); then
+  step "Мало памяти (${MEM_MB} МБ RAM, ${SWAP_MB} МБ swap) — добавляю swap 2 ГБ"
+  remote "$SUDO sh -c 'test -f /swapfile || { fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048; } && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile && grep -q /swapfile /etc/fstab || echo \"/swapfile none swap sw 0 0\" >> /etc/fstab'" \
+    || red "  не получилось — если сборка упадёт, увеличьте RAM сервера"
 fi
 
 # ——— код ———
@@ -82,7 +107,7 @@ remote "$SUDO mkdir -p $APP_DIR && $SUDO chown \$(id -u):\$(id -g) $APP_DIR"
 tar czf - \
   --exclude=./node_modules --exclude=./.next --exclude=./.git --exclude=./data \
   --exclude='./.env' --exclude='./.env.local' --exclude='*.log' --exclude='*.tsbuildinfo' \
-  . | remote "cd $APP_DIR && find . -mindepth 1 -maxdepth 1 ! -name .env -exec rm -rf {} + && tar xzf -"
+  . | remote "cd $APP_DIR && find . -mindepth 1 -maxdepth 1 ! -name .env -exec rm -rf {} + && tar xzf - --no-same-owner"
 echo "  ok"
 
 # ——— секреты (только при первом деплое) ———
@@ -92,9 +117,9 @@ if ! remote "test -f $APP_DIR/.env"; then
   step "Первый деплой: генерирую секреты"
   remote "cd $APP_DIR && umask 077 && cat > .env" <<ENV
 POSTGRES_USER=stonemachine
-POSTGRES_PASSWORD=$(openssl rand -hex 24)
+POSTGRES_PASSWORD=$(rand_hex 24)
 POSTGRES_DB=stonemachine
-SESSION_SECRET=$(openssl rand -hex 32)
+SESSION_SECRET=$(rand_hex 32)
 SITE_URL=http://$HOST
 SITE_ADDRESS=:80
 COOKIE_SECURE=false
@@ -103,8 +128,11 @@ ENV
 fi
 
 # ——— сборка и запуск ———
-step "Собираю и запускаю контейнеры (первый раз — несколько минут)"
-remote "cd $APP_DIR && $SUDO docker compose up -d --build --remove-orphans" 2>&1 | grep -vE '^\s*$' | sed 's/^/  /' | tail -15
+step "Собираю и запускаю контейнеры (первый раз — 3–7 минут)"
+remote "cd $APP_DIR && $SUDO docker compose --progress plain up -d --build --remove-orphans 2>&1" | sed 's/^/  │ /' \
+  || die "Сборка не удалась — ошибка выше"
+# Caddyfile смонтирован файлом: после замены кода Caddy видел бы старую версию
+remote "cd $APP_DIR && $SUDO docker compose up -d --force-recreate --no-deps caddy" >/dev/null 2>&1
 
 step "Жду, пока приложение поднимется"
 for i in $(seq 1 60); do
