@@ -266,17 +266,83 @@ export async function saveProduct(id: string | null, _: FormState, fd: FormData)
   await Promise.all(removedFiles.map(deleteImage));
   revalidatePath("/", "layout");
   pingIndexNow([`/catalog/${slug}`, ...(oldSlug && oldSlug !== slug ? [`/catalog/${oldSlug}`] : []), "/catalog"]);
-  redirect(`/admin?saved=${encodeURIComponent(data.title)}`);
+  const saved = encodeURIComponent(data.title);
+  redirect(fd.get("next") === "new" ? `/admin/products/new?saved=${saved}` : `/admin/products?saved=${saved}`);
 }
 
+// «Удалить» кладёт в корзину: товар пропадает с сайта, но 30 дней его можно вернуть
 export async function deleteProduct(fd: FormData) {
   await requireAdmin();
-  const id = String(fd.get("id"));
-  const images = await db.productImage.findMany({ where: { productId: id }, select: { file: true } });
-  const gone = await db.product.delete({ where: { id }, select: { slug: true } }).catch(() => null);
-  if (gone) pingIndexNow([`/catalog/${gone.slug}`]);
+  await trash([String(fd.get("id"))]);
+}
+
+export async function restoreProduct(fd: FormData) {
+  await requireAdmin();
+  await db.product.updateMany({ where: { id: String(fd.get("id")) }, data: { deletedAt: null } });
+  revalidatePath("/", "layout");
+}
+
+export async function purgeProduct(fd: FormData) {
+  await requireAdmin();
+  await purge([String(fd.get("id"))]);
+}
+
+async function trash(ids: string[]) {
+  const rows = await db.product.findMany({ where: { id: { in: ids } }, select: { slug: true, published: true } });
+  await db.product.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date(), published: false } });
+  revalidatePath("/", "layout");
+  pingIndexNow(rows.filter((r) => r.published).map((r) => `/catalog/${r.slug}`));
+}
+
+async function purge(ids: string[]) {
+  const images = await db.productImage.findMany({ where: { productId: { in: ids } }, select: { file: true } });
+  await db.product.deleteMany({ where: { id: { in: ids } } });
   await Promise.all(images.map((i) => deleteImage(i.file)));
   revalidatePath("/", "layout");
+}
+
+export async function purgeExpiredTrash() {
+  const old = await db.product.findMany({
+    where: { deletedAt: { lt: new Date(Date.now() - 30 * 24 * 3600_000) } },
+    select: { id: true },
+  });
+  if (old.length) await purge(old.map((o) => o.id));
+}
+
+const BULK = ["publish", "hide", "stock", "nostock", "trash", "restore", "purge", "category"] as const;
+
+export async function bulkProducts(fd: FormData): Promise<void> {
+  await requireAdmin();
+  const action = String(fd.get("action")) as (typeof BULK)[number];
+  let ids: string[] = [];
+  try {
+    ids = z.array(z.string().max(40)).max(500).parse(JSON.parse(String(fd.get("ids") ?? "[]")));
+  } catch {
+    return;
+  }
+  if (!ids.length || !BULK.includes(action)) return;
+
+  const where = { id: { in: ids } };
+  switch (action) {
+    case "publish": await db.product.updateMany({ where: { ...where, deletedAt: null }, data: { published: true } }); break;
+    case "hide": await db.product.updateMany({ where, data: { published: false } }); break;
+    case "stock": await db.product.updateMany({ where, data: { inStock: true } }); break;
+    case "nostock": await db.product.updateMany({ where, data: { inStock: false } }); break;
+    case "trash": return trash(ids);
+    case "restore": await db.product.updateMany({ where, data: { deletedAt: null } }); break;
+    case "purge": return purge(ids);
+    case "category": {
+      const categoryId = String(fd.get("categoryId") ?? "") || null;
+      if (categoryId && !(await db.category.findUnique({ where: { id: categoryId } }))) return;
+      await db.product.updateMany({ where, data: { categoryId } });
+      break;
+    }
+  }
+  revalidatePath("/", "layout");
+  if (action === "publish" || action === "hide" || action === "stock" || action === "nostock") {
+    const rows = await db.product.findMany({ where, select: { slug: true } });
+    pingIndexNow(rows.map((r) => `/catalog/${r.slug}`));
+  }
 }
 
 export async function toggleProductFlag(fd: FormData) {
@@ -317,17 +383,33 @@ export async function saveCategory(_: FormState, fd: FormData): Promise<FormStat
   await requireAdmin();
   const id = String(fd.get("id") ?? "") || null;
   const name = String(fd.get("name") ?? "").trim().slice(0, 60);
-  const sortOrder = Number(fd.get("sortOrder") ?? 0) || 0;
-  if (name.length < 2) return { error: "Название — минимум 2 символа" };
+  if (!name) return { error: "Введите название" };
 
-  let slug = slugify(String(fd.get("slug") ?? "") || name) || "cat";
-  const clash = await db.category.findUnique({ where: { slug } });
-  if (clash && clash.id !== id) slug = `${slug}-${Date.now().toString(36).slice(-4)}`;
+  const clash = await db.category.findFirst({ where: { name: { equals: name, mode: "insensitive" }, NOT: id ? { id } : undefined } });
+  if (clash) return { error: `Категория «${clash.name}» уже есть` };
 
-  if (id) await db.category.update({ where: { id }, data: { name, slug, sortOrder } });
-  else await db.category.create({ data: { name, slug, sortOrder } });
+  if (id) {
+    // Адрес категории при переименовании не меняем — иначе сломаются ссылки из поисковиков
+    await db.category.update({ where: { id }, data: { name } });
+  } else {
+    const last = await db.category.findFirst({ orderBy: { sortOrder: "desc" }, select: { sortOrder: true } });
+    await db.category.create({ data: { name, slug: await uniqueCategorySlug(name), sortOrder: (last?.sortOrder ?? 0) + 1 } });
+  }
   revalidatePath("/", "layout");
-  return { ok: id ? "Сохранено" : `Категория «${name}» добавлена` };
+  return { ok: id ? "Сохранено" : `«${name}» добавлена` };
+}
+
+export async function moveCategory(fd: FormData) {
+  await requireAdmin();
+  const id = String(fd.get("id"));
+  const dir = Number(fd.get("dir")) < 0 ? -1 : 1;
+  const all = await db.category.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { id: true } });
+  const i = all.findIndex((c) => c.id === id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= all.length) return;
+  [all[i], all[j]] = [all[j], all[i]];
+  await db.$transaction(all.map((c, k) => db.category.update({ where: { id: c.id }, data: { sortOrder: k } })));
+  revalidatePath("/", "layout");
 }
 
 export async function deleteCategory(fd: FormData) {

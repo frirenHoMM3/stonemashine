@@ -48,6 +48,7 @@ model Product {
   featured    Boolean        @default(false)
   published   Boolean        @default(true)
   views       Int            @default(0)
+  deletedAt   DateTime?
   categoryId  String?
   category    Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   images      ProductImage[]
@@ -57,6 +58,7 @@ model Product {
   @@index([published, createdAt])
   @@index([categoryId])
   @@index([carMake, carModel])
+  @@index([deletedAt])
 }
 
 model ProductImage {
