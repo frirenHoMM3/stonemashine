@@ -16,8 +16,7 @@ export default async function SettingsPage() {
   return (
     <div className="grid max-w-5xl gap-10 lg:grid-cols-[1fr_320px]">
       <div>
-        <div className="label">Сайт</div>
-        <h1 className="h-display mt-2 mb-8 text-4xl sm:text-5xl">Настройки</h1>
+        <h1 className="h-display mb-8 text-4xl sm:text-5xl">Настройки</h1>
         <SettingsForm values={values} labels={SETTING_KEYS} />
       </div>
 

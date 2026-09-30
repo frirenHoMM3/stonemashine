@@ -46,12 +46,12 @@ export function ProductCard({ p, index = 0 }: { p: CardProduct; index?: number }
             <span className="label">Нет фото</span>
           </div>
         )}
-        <div className="absolute left-0 top-0 flex gap-px">
-          <span className="max-w-[70%] truncate bg-ink/85 px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-bone backdrop-blur sm:px-2.5 sm:py-1 sm:text-[10px]">
+        <div className="absolute left-0 top-0 flex max-w-[calc(100%-8px)] gap-px">
+          <span className="min-w-0 truncate bg-ink/85 px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-bone backdrop-blur sm:px-2.5 sm:py-1 sm:text-[10px]">
             {conditionLabel(p)}
           </span>
           {!p.inStock && (
-            <span className="bg-smoke px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-ink sm:px-2.5 sm:py-1 sm:text-[10px]">
+            <span className="shrink-0 bg-smoke px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-ink sm:px-2.5 sm:py-1 sm:text-[10px]">
               <span className="sm:hidden">Нет</span>
               <span className="max-sm:hidden">Нет в наличии</span>
             </span>

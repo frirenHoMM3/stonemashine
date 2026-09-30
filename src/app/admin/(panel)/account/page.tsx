@@ -8,8 +8,7 @@ export default async function Account() {
   const admin = await requireAdmin();
   return (
     <div className="max-w-xl">
-      <div className="label">Доступ</div>
-      <h1 className="h-display mt-2 text-5xl">Аккаунт</h1>
+      <h1 className="h-display text-4xl sm:text-5xl">Аккаунт</h1>
       <dl className="mt-6 space-y-1 font-mono text-sm">
         <div><span className="text-smoke">логин:</span> {admin.username}</div>
         <div><span className="text-smoke">последний вход:</span> {admin.lastLoginAt?.toLocaleString("ru-RU") ?? "—"}</div>

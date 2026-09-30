@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { parseSections, parseSpecs } from "@/lib/format";
 import { productFormLookups } from "@/lib/admin-data";
+import { restoreProduct } from "../../../actions";
+import { IconExternal } from "@/components/icons";
 import { ProductForm } from "@/components/admin/ProductForm";
 
 export const metadata = { title: "Редактирование" };
@@ -19,13 +21,25 @@ export default async function EditProduct({ params }: { params: Promise<{ id: st
 
   return (
     <div>
-      <Link href="/admin" className="label hover:text-bone">← Товары</Link>
-      <div className="mt-3 mb-10 flex flex-wrap items-end justify-between gap-4">
-        <h1 className="h-display text-5xl">{p.title}</h1>
-        <div className="font-mono text-xs text-smoke">
-          создан {p.createdAt.toLocaleDateString("ru-RU")} · изменён {p.updatedAt.toLocaleString("ru-RU")} · {p.views} просм.
-        </div>
+      <Link href="/admin/products" className="label hover:text-bone">← Все товары</Link>
+      <div className="mt-2 mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+        <h1 className="h-display min-w-0 break-words text-3xl sm:text-5xl">{p.title}</h1>
+        {p.published && !p.deletedAt && (
+          <Link href={`/catalog/${p.slug}`} target="_blank" className="btn btn-ghost btn-sm">
+            Открыть на сайте <IconExternal width={14} />
+          </Link>
+        )}
       </div>
+      <div className="-mt-3 mb-6 font-mono text-xs text-smoke">
+        изменён {p.updatedAt.toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })} · {p.views} просмотров
+      </div>
+      {p.deletedAt && (
+        <form action={restoreProduct} className="mb-6 flex flex-wrap items-center gap-3 border-l-2 border-red bg-red/10 px-4 py-3 text-sm">
+          <input type="hidden" name="id" value={p.id} />
+          Товар в корзине и не виден на сайте.
+          <button className="btn btn-ghost btn-sm">Вернуть из корзины</button>
+        </form>
+      )}
       <ProductForm
         {...lookups}
         p={{

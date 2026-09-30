@@ -3,16 +3,17 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const ITEMS = [
-  { href: "/admin", label: "Товары", match: (p: string) => p === "/admin" || p.startsWith("/admin/products") },
+  { href: "/admin", label: "Сводка", match: (p: string) => p === "/admin" },
+  { href: "/admin/products", label: "Товары" },
   { href: "/admin/categories", label: "Категории" },
-  { href: "/admin/settings", label: "Настройки сайта" },
+  { href: "/admin/settings", label: "Настройки" },
   { href: "/admin/account", label: "Аккаунт" },
 ];
 
 export function AdminNav() {
   const path = usePathname();
   return (
-    <nav className="flex gap-1 overflow-x-auto px-3 pb-3 lg:flex-col lg:px-3 lg:py-4">
+    <nav className="no-scrollbar flex gap-1 overflow-x-auto px-3 pb-3 lg:flex-col lg:px-3 lg:py-4">
       {ITEMS.map((it) => {
         const active = it.match ? it.match(path) : path.startsWith(it.href);
         return (

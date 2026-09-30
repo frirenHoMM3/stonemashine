@@ -9,9 +9,10 @@ export function AutoSubmit() {
     if (!form) return;
     const on = (e: Event) => {
       const t = e.target as HTMLElement;
-      if (t.matches("select, input[type=checkbox]") && !t.hasAttribute("data-no-auto")) {
+      if (t.matches("select, input[type=checkbox], input[data-dropdown]") && !t.hasAttribute("data-no-auto")) {
+        // Сменили марку — старая модель уже не подходит
         if (t.getAttribute("name") === "make") {
-          const model = form.querySelector<HTMLSelectElement>("select[name=model]");
+          const model = form.querySelector<HTMLInputElement | HTMLSelectElement>("[name=model]");
           if (model) model.value = "";
         }
         form.requestSubmit();

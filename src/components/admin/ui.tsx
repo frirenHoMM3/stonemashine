@@ -61,22 +61,24 @@ export function FormMessage({ state }: { state: FormState }) {
   );
 }
 
-export function Field({ label, error, hint, children, className = "" }: {
+// as="div" — для выпадающих списков: внутри <label> браузер пересылает клики на кнопку списка
+export function Field({ label, error, hint, children, className = "", as: Tag = "label" }: {
   label: string;
   error?: string;
   hint?: string;
   children: React.ReactNode;
   className?: string;
+  as?: "label" | "div";
 }) {
   return (
-    <label className={`block ${className}`}>
+    <Tag className={`block ${className}`}>
       <span className="label mb-2 flex justify-between gap-2">
         {label}
         {error && <span className="normal-case tracking-normal text-red-hot">{error}</span>}
       </span>
       {children}
       {hint && !error && <span className="mt-1.5 block text-xs text-smoke">{hint}</span>}
-    </label>
+    </Tag>
   );
 }
 
@@ -97,7 +99,9 @@ export function useKeepForm(fn: (state: FormState, fd: FormData) => Promise<Form
   const [, startTransition] = useTransition();
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
+    // submitter — чтобы до сервера дошло, какой кнопкой отправили («Сохранить» или «…и добавить ещё»)
+    const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLElement | null;
+    const fd = new FormData(e.currentTarget, submitter);
     startTransition(() => dispatch(fd));
   };
   return { state, pending, onSubmit };

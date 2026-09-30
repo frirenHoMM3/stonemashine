@@ -6,8 +6,16 @@ import { IconDown, IconPlus, IconTrash, IconUp } from "../icons";
 export type Img = { file: string; width: number; height: number };
 type Pending = { id: string; name: string; preview: string; error?: string };
 
-export function ImageManager({ initial, onBusyChange }: { initial: Img[]; onBusyChange: (busy: boolean) => void }) {
-  const [images, setImages] = useState<Img[]>(initial);
+export function ImageManager({ initial, onBusyChange, onChange }: {
+  initial: Img[];
+  onBusyChange: (busy: boolean) => void;
+  onChange?: () => void;
+}) {
+  const [images, setImagesRaw] = useState<Img[]>(initial);
+  const setImages: typeof setImagesRaw = (v) => {
+    setImagesRaw(v);
+    onChange?.();
+  };
   const [pending, setPending] = useState<Pending[]>([]);
   const [drag, setDrag] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -69,7 +77,7 @@ export function ImageManager({ initial, onBusyChange }: { initial: Img[]; onBusy
           setDrag(false);
           upload(e.dataTransfer.files);
         }}
-        className={`grid grid-cols-2 gap-2 border border-dashed p-2 transition-colors sm:grid-cols-3 xl:grid-cols-4 ${
+        className={`grid gap-2 border border-dashed p-2 transition-colors ${images.length || pending.length ? "grid-cols-2 sm:grid-cols-3 xl:grid-cols-4" : "grid-cols-1"} ${
           drag ? "border-red bg-red/5" : "border-line-strong"
         }`}
       >
@@ -123,10 +131,12 @@ export function ImageManager({ initial, onBusyChange }: { initial: Img[]; onBusy
         <button
           type="button"
           onClick={() => input.current?.click()}
-          className="flex aspect-[4/3] flex-col items-center justify-center gap-2 border border-line bg-coal text-ash transition-colors hover:border-red hover:text-bone"
+          className={`flex flex-col items-center justify-center gap-2 border border-line bg-coal text-ash transition-colors hover:border-red hover:text-bone ${
+            images.length || pending.length ? "aspect-[4/3]" : "h-40"
+          }`}
         >
           <IconPlus width={22} />
-          <span className="font-mono text-[11px] uppercase tracking-wider">Добавить фото</span>
+          <span className="font-mono text-[11px] uppercase tracking-wider">{images.length ? "Ещё фото" : "Добавить фото"}</span>
           <span className="text-[10px] text-smoke">или перетащите сюда</span>
         </button>
       </div>

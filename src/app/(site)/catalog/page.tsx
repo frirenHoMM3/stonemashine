@@ -6,6 +6,7 @@ import { CONDITIONS, CONDITION_LABEL } from "@/lib/format";
 import { ProductCard } from "@/components/ProductCard";
 import { Reveal } from "@/components/Reveal";
 import { AutoSubmit } from "@/components/AutoSubmit";
+import { Dropdown } from "@/components/Dropdown";
 import { IconSearch } from "@/components/icons";
 
 export const dynamic = "force-dynamic";
@@ -178,7 +179,7 @@ export default async function Catalog({ searchParams }: { searchParams: Promise<
 
         {/* ——— СПИСОК ——— */}
         <div className="min-w-0">
-          <div className="-mx-4 mb-4 flex gap-5 overflow-x-auto whitespace-nowrap px-4 pb-1 font-display text-sm font-bold uppercase tracking-[0.08em] sm:mx-0 sm:px-0 md:mb-5 md:gap-6">
+          <div className="no-scrollbar -mx-4 mb-4 flex gap-5 overflow-x-auto overflow-y-hidden whitespace-nowrap px-4 pb-1 font-display text-sm font-bold uppercase tracking-[0.08em] sm:mx-0 sm:px-0 md:mb-5 md:gap-6">
             {Object.entries(SORTS).map(([k, v]) => (
               <Link
                 key={k}
@@ -249,12 +250,15 @@ function pageList(cur: number, total: number) {
 
 function Select({ name, label, value, options }: { name: string; label: string; value: string; options: [string, string][] }) {
   return (
-    <label className="block">
+    <div>
       <span className="label mb-2 block">{label}</span>
-      <select name={name} defaultValue={value} className="field">
-        <option value="">Любая</option>
-        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-    </label>
+      <Dropdown
+        key={value}
+        name={name}
+        defaultValue={value}
+        ariaLabel={label}
+        options={[{ value: "", label: "Любая" }, ...options.map(([v, l]) => ({ value: v, label: l }))]}
+      />
+    </div>
   );
 }
