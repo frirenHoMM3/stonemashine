@@ -436,6 +436,7 @@ export async function saveSettings(_: FormState, fd: FormData): Promise<FormStat
       v = /content=["']([^"']+)["']/.exec(v)?.[1] ?? v;
       if (v && !/^[\w-]{6,100}$/.test(v)) fieldErrors[key] = "Вставьте код или meta-тег целиком";
     }
+    if (key === "operatorEmail" && v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) fieldErrors[key] = "Похоже на неверный e-mail";
     if (key === "shopName" && !v) fieldErrors[key] = "Не может быть пустым";
     if (v && URL_KEYS.includes(key) && !/^https:\/\//.test(v)) fieldErrors[key] = "Нужна ссылка, начинающаяся с https://";
     if (key === "telegram" && v && !/^[A-Za-z0-9_]{4,32}$/.test(v)) fieldErrors[key] = "Только username, например stonemachine_parts";

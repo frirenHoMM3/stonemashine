@@ -26,6 +26,15 @@ const GROUPS: { title: string; note?: string; fields: F[] }[] = [
     ],
   },
   {
+    title: "Владелец сайта",
+    note: "Показывается в подвале и в политике конфиденциальности (требование закона)",
+    fields: [
+      { key: "operatorName", placeholder: "ИП Иванов Иван Иванович" },
+      { key: "operatorInn", placeholder: "ИНН 770000000000, ОГРНИП 300000000000000" },
+      { key: "operatorEmail", placeholder: "info@example.ru" },
+    ],
+  },
+  {
     title: "Поисковики и статистика",
     note: "Нужно только после подключения домена",
     fields: [

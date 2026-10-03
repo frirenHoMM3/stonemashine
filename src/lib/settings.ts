@@ -15,6 +15,9 @@ export const SETTING_KEYS = {
   yandexVerification: "Яндекс.Вебмастер: код подтверждения",
   googleVerification: "Google Search Console: код подтверждения",
   metrikaId: "Номер счётчика Яндекс.Метрики",
+  operatorName: "Владелец сайта (ФИО или ИП)",
+  operatorInn: "ИНН / ОГРНИП",
+  operatorEmail: "E-mail для обращений",
 } as const;
 
 export type SettingKey = keyof typeof SETTING_KEYS;
@@ -33,6 +36,9 @@ const DEFAULTS: Settings = {
   yandexVerification: "",
   googleVerification: "",
   metrikaId: "",
+  operatorName: "",
+  operatorInn: "",
+  operatorEmail: "",
 };
 
 export const getSettings = cache(async (): Promise<Settings> => {

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Settings } from "@/lib/settings";
 import { Mark } from "./icons";
+import { ConsentReset } from "./ConsentBanner";
 
 export function Footer({ s }: { s: Settings }) {
   return (
@@ -39,6 +40,15 @@ export function Footer({ s }: { s: Settings }) {
         <div className="wrap flex h-14 items-center justify-between font-mono text-[11px] uppercase tracking-[0.14em] text-smoke">
           <span>© {new Date().getFullYear()} {s.shopName}</span>
           <span>Продажа через Авито</span>
+        </div>
+      </div>
+      <div className="border-t border-line">
+        <div className="wrap flex flex-col gap-2 py-4 text-xs text-smoke sm:flex-row sm:items-center sm:justify-between">
+          <span>{[s.operatorName, s.operatorInn].filter(Boolean).join(" · ")}</span>
+          <span className="flex flex-wrap gap-x-5 gap-y-1">
+            <Link href="/privacy" className="underline decoration-line-strong underline-offset-2 hover:text-bone">Политика конфиденциальности</Link>
+            {/^\d+$/.test(s.metrikaId) && <ConsentReset />}
+          </span>
         </div>
       </div>
     </footer>

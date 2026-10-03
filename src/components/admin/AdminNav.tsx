@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 const ITEMS = [
   { href: "/admin", label: "Сводка", match: (p: string) => p === "/admin" },
   { href: "/admin/products", label: "Товары" },
+  { href: "/admin/stats", label: "Статистика" },
   { href: "/admin/categories", label: "Категории" },
   { href: "/admin/settings", label: "Настройки" },
   { href: "/admin/account", label: "Аккаунт" },

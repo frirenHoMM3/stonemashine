@@ -2,6 +2,8 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { JsonLd } from "@/components/JsonLd";
 import { Metrika } from "@/components/Metrika";
+import { Tracker } from "@/components/Tracker";
+import { ConsentBanner } from "@/components/ConsentBanner";
 import { getSettings } from "@/lib/settings";
 import { abs } from "@/lib/site";
 
@@ -25,7 +27,9 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
       <Header shopName={s.shopName} phone={s.phone} />
       <main>{children}</main>
       <Footer s={s} />
+      <Tracker />
       <Metrika id={s.metrikaId} />
+      <ConsentBanner hasMetrika={/^\d+$/.test(s.metrikaId)} />
     </>
   );
 }

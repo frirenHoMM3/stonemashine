@@ -87,3 +87,17 @@ model Setting {
   key   String @id
   value String
 }
+
+// Анонимная статистика: без IP, без user-agent, без идентификаторов посетителя
+model Hit {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  kind      String   // view | avito | phone | tg | wa
+  path      String
+  ref       String?
+  device    String   // mobile | tablet | desktop
+
+  @@index([createdAt])
+  @@index([kind, createdAt])
+  @@index([path, createdAt])
+}

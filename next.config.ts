@@ -1,5 +1,19 @@
 import type { NextConfig } from "next";
 
+// Метрика: скрипт с yastatic/mc.yandex, отправка данных на mc.yandex.*. Inline нужен самому Next.js.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' https://mc.yandex.ru https://yastatic.net",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https://mc.yandex.ru https://mc.yandex.com",
+  "connect-src 'self' https://mc.yandex.ru https://mc.yandex.com",
+  "font-src 'self' data:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
 const config: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
@@ -20,6 +34,8 @@ const config: NextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), interest-cohort=()" },
+          { key: "Content-Security-Policy", value: CSP },
         ],
       },
     ];
