@@ -19,20 +19,18 @@ for arg in "$@"; do
 done
 
 cd "$(dirname "$0")"
+# shellcheck source=scripts/tui.sh
+source scripts/tui.sh
 
-red()  { printf '\033[31m%s\033[0m\n' "$*"; }
-bold() { printf '\033[1m%s\033[0m\n' "$*"; }
-step() { printf '\n\033[31m▌\033[0m \033[1m%s\033[0m\n' "$*"; }
-die()  { red "✘ $*"; exit 1; }
 rand_hex() { openssl rand -hex "$1" 2>/dev/null || od -An -tx1 -N "$1" /dev/urandom | tr -d ' \n'; }
 
-for bin in ssh tar; do command -v "$bin" >/dev/null || die "Не найдена программа $bin"; done
-[[ -f docker-compose.yml && -f Dockerfile ]] || die "Запускайте из папки проекта"
+for bin in ssh tar; do command -v "$bin" >/dev/null || ui_die "не найдена программа $bin"; done
+[[ -f docker-compose.yml && -f Dockerfile ]] || ui_die "запускайте из папки проекта"
 
 # ——— ввод ———
-bold "STONEMACHINE — деплой"
+ui_title "Деплой STONEMACHINE"
 read -rp "IP сервера: " HOST
-[[ "$HOST" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ || "$HOST" =~ ^[0-9a-fA-F:]+$ ]] || die "Это не похоже на IP-адрес"
+[[ "$HOST" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ || "$HOST" =~ ^[0-9a-fA-F:]+$ ]] || ui_die "это не похоже на IP-адрес"
 read -rp "Пользователь SSH [root]: " SSH_USER
 SSH_USER="${SSH_USER:-root}"
 read -rp "Порт SSH [22]: " SSH_PORT
@@ -48,12 +46,15 @@ CTL="$WORK/ctl"
 cleanup() {
   ssh -S "$CTL" -O exit "$SSH_USER@$HOST" >/dev/null 2>&1 || true
   rm -rf "$WORK"
+  tui_cleanup_logs
 }
 trap cleanup EXIT
+ui_abort_on_signal
+ui_trap_errors
 
 SSH_OPTS=(-p "$SSH_PORT" -o ControlPath="$CTL" -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30)
 
-step "Подключаюсь к $SSH_USER@$HOST:$SSH_PORT"
+ui_step "Подключение к $SSH_USER@$HOST:$SSH_PORT"
 if [[ -n "$SSH_PASS" ]]; then
   # shellcheck disable=SC2016  # $DEPLOY_SSH_PASS должен раскрыться в askpass, а не здесь
   printf '#!/bin/sh\nprintf "%%s\\n" "$DEPLOY_SSH_PASS"\n' > "$WORK/askpass"
@@ -61,10 +62,10 @@ if [[ -n "$SSH_PASS" ]]; then
   DEPLOY_SSH_PASS="$SSH_PASS" SSH_ASKPASS="$WORK/askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 \
     ssh "${SSH_OPTS[@]}" -o ControlMaster=yes -o ControlPersist=15m -o NumberOfPasswordPrompts=1 \
         -o PreferredAuthentications=password,keyboard-interactive -fN "$SSH_USER@$HOST" </dev/null \
-    || die "Не удалось войти: проверьте IP, пользователя и пароль"
+    || ui_die "не удалось войти: проверьте IP, пользователя и пароль"
 else
   ssh "${SSH_OPTS[@]}" -o ControlMaster=yes -o ControlPersist=15m -o BatchMode=yes -fN "$SSH_USER@$HOST" \
-    || die "Вход по ключу не удался. Запустите снова и введите пароль"
+    || ui_die "вход по ключу не удался. Запустите снова и введите пароль"
 fi
 unset SSH_PASS
 
@@ -73,48 +74,51 @@ remote() { ssh "${SSH_OPTS[@]}" "$SSH_USER@$HOST" "$@"; }
 
 SUDO=""
 if [[ "$SSH_USER" != "root" ]]; then
-  remote 'sudo -n true' 2>/dev/null || die "У пользователя $SSH_USER нет sudo без пароля. Используйте root или настройте NOPASSWD"
+  remote 'sudo -n true' 2>/dev/null || ui_die "у пользователя $SSH_USER нет sudo без пароля. Используйте root или настройте NOPASSWD"
   SUDO="sudo"
 fi
-echo "  ok"
+ui_ok "соединение установлено"
 
 # ——— Docker ———
-step "Проверяю Docker на сервере"
+ui_step "Docker на сервере"
 if remote "command -v docker >/dev/null && $SUDO docker compose version >/dev/null 2>&1"; then
-  echo "  уже установлен"
+  ui_ok "уже установлен"
 else
-  echo "  ставлю Docker (официальный скрипт get.docker.com), 1–3 минуты…"
-  remote "command -v curl >/dev/null || { $SUDO apt-get update -qq && $SUDO apt-get install -y -qq curl ca-certificates; }" >/dev/null 2>&1 \
-    || die "На сервере нет curl и не получилось его поставить (нужен Debian/Ubuntu)"
-  remote "curl -fsSL https://get.docker.com | $SUDO sh" >/dev/null 2>&1 || die "Не удалось установить Docker"
+  ui_run "curl на сервере" remote "command -v curl >/dev/null || { $SUDO apt-get update -qq && $SUDO apt-get install -y -qq curl ca-certificates; }" \
+    || ui_die "на сервере нет curl и не получилось его поставить (нужен Debian/Ubuntu)"
+  ui_run "установка Docker (get.docker.com)" remote "curl -fsSL https://get.docker.com | $SUDO sh" || ui_die "не удалось установить Docker"
   remote "$SUDO systemctl enable --now docker" >/dev/null 2>&1 || true
-  echo "  ok"
 fi
 
 # ——— память ———
 # Сборка Next.js съедает ~1.5 ГБ. На дешёвых VPS с 1 ГБ без swap она просто падает.
 MEM_MB=$(remote "awk '/MemTotal/ {print int(\$2/1024)}' /proc/meminfo")
 SWAP_MB=$(remote "awk '/SwapTotal/ {print int(\$2/1024)}' /proc/meminfo")
+have_mb=$(( MEM_MB + SWAP_MB )); (( have_mb > 2500 )) && have_mb=2500
+ui_kv "Память" "$MEM_MB МБ RAM + $SWAP_MB МБ swap  $(ui_bar "$have_mb" 2500 16)  для сборки нужно ≥ 2500 МБ"
 if (( MEM_MB + SWAP_MB < 2500 )); then
-  step "Мало памяти (${MEM_MB} МБ RAM, ${SWAP_MB} МБ swap) — добавляю swap 2 ГБ"
-  remote "$SUDO sh -c 'test -f /swapfile || { fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048; } && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile && grep -q /swapfile /etc/fstab || echo \"/swapfile none swap sw 0 0\" >> /etc/fstab'" \
-    || red "  не получилось — если сборка упадёт, увеличьте RAM сервера"
+  ui_run "swap 2 ГБ" remote "$SUDO sh -c 'test -f /swapfile || { fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048; } && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile && grep -q /swapfile /etc/fstab || echo \"/swapfile none swap sw 0 0\" >> /etc/fstab'" \
+    || ui_warn "не получилось — если сборка упадёт, увеличьте RAM сервера"
 fi
 
 # ——— код ———
-step "Заливаю код в $APP_DIR"
+ui_step "Код в $APP_DIR"
 remote "$SUDO mkdir -p $APP_DIR && $SUDO chown \$(id -u):\$(id -g) $APP_DIR"
-tar czf - \
-  --exclude=./node_modules --exclude=./.next --exclude=./.git --exclude=./data \
-  --exclude='./.env' --exclude='./.env.local' --exclude='*.log' --exclude='*.tsbuildinfo' \
-  . | remote "cd $APP_DIR && find . -mindepth 1 -maxdepth 1 ! -name .env -exec rm -rf {} + && tar xzf - --no-same-owner"
-echo "  ok"
+upload_code() {
+  tar czf - \
+    --exclude=./node_modules --exclude=./.next --exclude=./.git --exclude=./data \
+    --exclude='./.env' --exclude='./.env.local' --exclude='*.log' --exclude='*.tsbuildinfo' \
+    . | tee >(wc -c > "$WORK/upload.size") \
+      | remote "cd $APP_DIR && find . -mindepth 1 -maxdepth 1 ! -name .env -exec rm -rf {} + && tar xzf - --no-same-owner"
+}
+ui_run "архив и распаковка" upload_code
+ui_xfer_add "код (tar.gz)" "$(tr -d '[:space:]' < "$WORK/upload.size" 2>/dev/null || echo 0)"
 
 # ——— секреты (только при первом деплое) ———
 FIRST_DEPLOY=0
 if ! remote "test -f $APP_DIR/.env"; then
   FIRST_DEPLOY=1
-  step "Первый деплой: генерирую секреты"
+  ui_step "Секреты (первый деплой)"
   remote "cd $APP_DIR && umask 077 && cat > .env" <<ENV
 POSTGRES_USER=stonemachine
 POSTGRES_PASSWORD=$(rand_hex 24)
@@ -124,37 +128,36 @@ SITE_URL=http://$HOST
 SITE_ADDRESS=:80
 COOKIE_SECURE=false
 ENV
-  echo "  .env создан на сервере (в репозиторий не попадает)"
+  ui_ok ".env создан на сервере (в репозиторий не попадает)"
 fi
 
 # ——— сборка и запуск ———
-step "Собираю и запускаю контейнеры (первый раз — 3–7 минут)"
-remote "cd $APP_DIR && $SUDO docker compose --progress plain up -d --build --remove-orphans 2>&1" | sed 's/^/  │ /' \
-  || die "Сборка не удалась — ошибка выше"
+ui_step "Сборка и запуск контейнеров"
+ui_info "первый раз — 3–7 минут; строка справа показывает, что собирается сейчас"
+ui_run "docker compose up --build" remote "cd $APP_DIR && $SUDO docker compose --progress plain up -d --build --remove-orphans 2>&1" \
+  || ui_die "сборка не удалась — ошибка выше"
 # Caddyfile смонтирован файлом: после замены кода Caddy видел бы старую версию
 remote "cd $APP_DIR && $SUDO docker compose up -d --force-recreate --no-deps caddy" >/dev/null 2>&1
 
-step "Жду, пока приложение поднимется"
-for i in $(seq 1 60); do
-  status=$(remote "cd $APP_DIR && $SUDO docker compose ps app --format '{{.Health}}'" 2>/dev/null || true)
-  [[ "$status" == "healthy" ]] && break
-  [[ $i -eq 60 ]] && { remote "cd $APP_DIR && $SUDO docker compose logs --tail 40 app"; die "Приложение не стартовало, логи выше"; }
-  sleep 3
-done
-echo "  ok"
+ui_step "Ожидание приложения"
+app_healthy() { [[ "$(remote "cd $APP_DIR && $SUDO docker compose ps app --format '{{.Health}}'" 2>/dev/null || true)" == "healthy" ]]; }
+if ! ui_health "контейнер app → healthy" 60 3 app_healthy; then
+  remote "cd $APP_DIR && $SUDO docker compose logs --tail 40 app" || true
+  ui_die "приложение не стартовало, логи выше"
+fi
 
 # ——— админ ———
 HAS_ADMIN=$(remote "cd $APP_DIR && $SUDO docker compose exec -T app node scripts/create-admin.mjs --count" 2>/dev/null | tr -d '[:space:]' || echo 0)
 if [[ "$HAS_ADMIN" == "0" || $RESET_ADMIN -eq 1 ]]; then
-  step "Учётка админки"
+  ui_step "Учётка админки"
   read -rp "Логин админа [admin]: " ADMIN_USER
   ADMIN_USER="${ADMIN_USER:-admin}"
-  [[ "$ADMIN_USER" =~ ^[A-Za-z0-9_.-]{3,64}$ ]] || die "Логин: 3–64 символа, латиница/цифры/._-"
+  [[ "$ADMIN_USER" =~ ^[A-Za-z0-9_.-]{3,64}$ ]] || ui_die "логин: 3–64 символа, латиница/цифры/._-"
   while :; do
     read -rsp "Пароль админа (мин. 10 символов): " P1; echo
     read -rsp "Повторите: " P2; echo
-    [[ "$P1" == "$P2" ]] || { red "  не совпадают"; continue; }
-    [[ ${#P1} -ge 10 ]] || { red "  короче 10 символов"; continue; }
+    [[ "$P1" == "$P2" ]] || { ui_warn "не совпадают"; continue; }
+    [[ ${#P1} -ge 10 ]] || { ui_warn "короче 10 символов"; continue; }
     break
   done
   # Пароль идёт через stdin, а не аргументами — его не видно в списке процессов сервера
@@ -163,12 +166,13 @@ if [[ "$HAS_ADMIN" == "0" || $RESET_ADMIN -eq 1 ]]; then
 fi
 
 # ——— итог ———
-step "Готово"
-echo "  Сайт:     http://$HOST"
-echo "  Админка:  http://$HOST/admin"
+ui_summary "Готово"
+echo
+ui_kv "Сайт"    "http://$HOST"
+ui_kv "Админка" "http://$HOST/admin"
 if [[ $FIRST_DEPLOY -eq 1 ]]; then
   echo
-  echo "  Когда появится домен: направьте A-запись на $HOST, затем на сервере в $APP_DIR/.env"
-  echo "  поставьте SITE_ADDRESS=ваш-домен.ru, SITE_URL=https://ваш-домен.ru, COOKIE_SECURE=true"
-  echo "  и запустите ./deploy.sh ещё раз — Caddy сам получит HTTPS-сертификат."
+  ui_dim "Когда появится домен: направьте A-запись на $HOST, затем на сервере в $APP_DIR/.env"
+  ui_dim "поставьте SITE_ADDRESS=ваш-домен.ru, SITE_URL=https://ваш-домен.ru, COOKIE_SECURE=true"
+  ui_dim "и запустите ./deploy.sh ещё раз — Caddy сам получит HTTPS-сертификат."
 fi
