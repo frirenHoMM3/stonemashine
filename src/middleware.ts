@@ -13,10 +13,10 @@ export async function middleware(req: NextRequest) {
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const url = req.nextUrl.clone();
-  url.pathname = "/admin/login";
-  url.search = "";
-  return NextResponse.redirect(url);
+  // За nginx nextUrl содержит внутренний адрес (127.0.0.1:3000) — берём публичный из заголовков прокси.
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? req.nextUrl.host;
+  const proto = req.headers.get("x-forwarded-proto") ?? "http";
+  return NextResponse.redirect(new URL("/admin/login", `${proto}://${host}`));
 }
 
 export const config = { matcher: ["/admin/:path*", "/api/admin/:path*"] };

@@ -85,7 +85,7 @@ https://ссылки-становятся-кликабельными
    ```
 3. Запустите `./deploy.sh` ещё раз.
 
-HTTPS-сертификат выпустится сам.
+HTTPS-сертификат выпустит certbot.
 
 ## Яндекс и Google
 
@@ -104,9 +104,9 @@ HTTPS-сертификат выпустится сам.
 ```bash
 cd /opt/stonemachine
 # база
-docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > backup-$(date +%F).sql
+sudo -u postgres pg_dump stonemachine > backup-$(date +%F).sql
 # фото
-docker compose exec -T app tar czf - -C /app/data uploads > photos-$(date +%F).tar.gz
+tar czf photos-$(date +%F).tar.gz -C /var/lib/stonemachine uploads
 ```
 
 Скачать к себе: `scp root@ВАШ-IP:'/opt/stonemachine/*-20*' .`
@@ -117,16 +117,17 @@ docker compose exec -T app tar czf - -C /app/data uploads > photos-$(date +%F).t
 
 ```bash
 cd /opt/stonemachine
-docker compose ps            # что запущено
-docker compose logs app      # ошибки сайта
-docker compose restart app   # перезапустить сайт
+systemctl status stonemachine    # что запущено
+journalctl -u stonemachine -n 50 # ошибки сайта
+systemctl restart stonemachine   # перезапустить сайт
+nginx -t && systemctl reload nginx
 ```
 
 ---
 
 ## Для разработчика
 
-Next.js 15 · PostgreSQL · Prisma · Tailwind 4 · Caddy · Docker Compose
+Next.js 15 · PostgreSQL · Prisma · Tailwind 4 · nginx · systemd
 
 ```bash
 npm install

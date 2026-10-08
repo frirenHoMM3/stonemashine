@@ -5,7 +5,7 @@
 #   ./deploy.sh --reset-admin   — то же + сменить логин/пароль админки
 #
 # Нужно на своей машине: bash, ssh, tar. На сервере: любой свежий Debian/Ubuntu,
-# Docker поставится сам при первом запуске.
+# nginx, PostgreSQL и Node.js 22 поставятся сами при первом запуске (без Docker).
 set -euo pipefail
 
 APP_DIR="/opt/stonemachine"
@@ -25,7 +25,7 @@ source scripts/tui.sh
 rand_hex() { openssl rand -hex "$1" 2>/dev/null || od -An -tx1 -N "$1" /dev/urandom | tr -d ' \n'; }
 
 for bin in ssh tar; do command -v "$bin" >/dev/null || ui_die "не найдена программа $bin"; done
-[[ -f docker-compose.yml && -f Dockerfile ]] || ui_die "запускайте из папки проекта"
+[[ -f package.json && -d prisma ]] || ui_die "запускайте из папки проекта"
 
 # ——— ввод ———
 ui_title "Деплой STONEMACHINE"
@@ -79,16 +79,17 @@ if [[ "$SSH_USER" != "root" ]]; then
 fi
 ui_ok "соединение установлено"
 
-# ——— Docker ———
-ui_step "Docker на сервере"
-if remote "command -v docker >/dev/null && $SUDO docker compose version >/dev/null 2>&1"; then
-  ui_ok "уже установлен"
+# ——— пакеты ———
+ui_step "Пакеты на сервере"
+ui_run "nginx, PostgreSQL, утилиты (apt)" remote "export DEBIAN_FRONTEND=noninteractive; $SUDO apt-get update -qq && $SUDO apt-get install -y -qq nginx postgresql curl ca-certificates openssl" \
+  || ui_die "apt не справился (нужен Debian/Ubuntu с доступом в интернет)"
+if remote "command -v node >/dev/null && [ \$(node -v | cut -d. -f1 | tr -d v) -ge 20 ]"; then
+  ui_ok "Node.js $(remote 'node -v')"
 else
-  ui_run "curl на сервере" remote "command -v curl >/dev/null || { $SUDO apt-get update -qq && $SUDO apt-get install -y -qq curl ca-certificates; }" \
-    || ui_die "на сервере нет curl и не получилось его поставить (нужен Debian/Ubuntu)"
-  ui_run "установка Docker (get.docker.com)" remote "curl -fsSL https://get.docker.com | $SUDO sh" || ui_die "не удалось установить Docker"
-  remote "$SUDO systemctl enable --now docker" >/dev/null 2>&1 || true
+  ui_run "Node.js 22 (nodesource)" remote "curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO bash - && $SUDO apt-get install -y -qq nodejs" \
+    || ui_die "не удалось поставить Node.js"
 fi
+remote "id stonemachine >/dev/null 2>&1 || $SUDO useradd --system --home-dir $APP_DIR --shell /usr/sbin/nologin stonemachine"
 
 # ——— память ———
 # Сборка Next.js съедает ~1.5 ГБ. На дешёвых VPS с 1 ГБ без swap она просто падает.
@@ -103,13 +104,13 @@ fi
 
 # ——— код ———
 ui_step "Код в $APP_DIR"
-remote "$SUDO mkdir -p $APP_DIR && $SUDO chown \$(id -u):\$(id -g) $APP_DIR"
+remote "$SUDO mkdir -p $APP_DIR && $SUDO chown -R \$(id -u):\$(id -g) $APP_DIR"
 upload_code() {
   tar czf - \
     --exclude=./node_modules --exclude=./.next --exclude=./.git --exclude=./data \
     --exclude='./.env' --exclude='./.env.local' --exclude='*.log' --exclude='*.tsbuildinfo' \
     . | tee >(wc -c > "$WORK/upload.size") \
-      | remote "cd $APP_DIR && find . -mindepth 1 -maxdepth 1 ! -name .env -exec rm -rf {} + && tar xzf - --no-same-owner"
+      | remote "cd $APP_DIR && find . -mindepth 1 -maxdepth 1 ! -name .env ! -name node_modules ! -name .lock.installed -exec rm -rf {} + && tar xzf - --no-same-owner"
 }
 ui_run "архив и распаковка" upload_code
 ui_xfer_add "код (tar.gz)" "$(tr -d '[:space:]' < "$WORK/upload.size" 2>/dev/null || echo 0)"
@@ -131,23 +132,132 @@ ENV
   ui_ok ".env создан на сервере (в репозиторий не попадает)"
 fi
 
-# ——— сборка и запуск ———
-ui_step "Сборка и запуск контейнеров"
+# ——— PostgreSQL ———
+ui_step "База данных"
+setup_db() {
+  remote "$SUDO bash -s -- $APP_DIR" <<'SH'
+set -euo pipefail
+cd "$1"
+set -a; . ./.env; set +a
+systemctl enable --now postgresql >/dev/null 2>&1
+for _ in $(seq 1 30); do runuser -u postgres -- pg_isready -q && break; sleep 1; done
+psql_() { (cd /tmp && runuser -u postgres -- psql -v ON_ERROR_STOP=1 -tA "$@"); }
+if [ "$(psql_ -c "SELECT 1 FROM pg_roles WHERE rolname='$POSTGRES_USER'")" = 1 ]; then
+  psql_ -c "ALTER ROLE \"$POSTGRES_USER\" PASSWORD '$POSTGRES_PASSWORD'" >/dev/null
+else
+  psql_ -c "CREATE ROLE \"$POSTGRES_USER\" LOGIN PASSWORD '$POSTGRES_PASSWORD'" >/dev/null
+fi
+[ "$(psql_ -c "SELECT 1 FROM pg_database WHERE datname='$POSTGRES_DB'")" = 1 ] \
+  || psql_ -c "CREATE DATABASE \"$POSTGRES_DB\" OWNER \"$POSTGRES_USER\"" >/dev/null
+# .env мог остаться от docker-версии — дописываем недостающее
+grep -q '^DATABASE_URL=' .env || echo "DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:5432/$POSTGRES_DB" >> .env
+grep -q '^UPLOAD_DIR=' .env || echo "UPLOAD_DIR=/var/lib/stonemachine/uploads" >> .env
+mkdir -p /var/lib/stonemachine/uploads
+SH
+}
+ui_run "роль и база PostgreSQL" setup_db || ui_die "не удалось настроить PostgreSQL"
+
+# ——— сборка ———
+ui_step "Сборка приложения"
 ui_info "первый раз — 3–7 минут; строка справа показывает, что собирается сейчас"
-ui_run "docker compose up --build" remote "cd $APP_DIR && $SUDO docker compose --progress plain up -d --build --remove-orphans 2>&1" \
-  || ui_die "сборка не удалась — ошибка выше"
-# Caddyfile смонтирован файлом: после замены кода Caddy видел бы старую версию
-remote "cd $APP_DIR && $SUDO docker compose up -d --force-recreate --no-deps caddy" >/dev/null 2>&1
+build_app() {
+  remote "$SUDO bash -s -- $APP_DIR" <<'SH'
+set -euo pipefail
+cd "$1"
+export NEXT_TELEMETRY_DISABLED=1
+if [ ! -d node_modules ] || ! cmp -s package-lock.json .lock.installed; then
+  npm ci --no-audit --no-fund
+  cp package-lock.json .lock.installed
+fi
+npx prisma generate
+npx next build
+set -a; . ./.env; set +a
+npx prisma migrate deploy
+chown -R stonemachine:stonemachine "$1" /var/lib/stonemachine
+SH
+}
+ui_run "npm ci · next build · миграции" build_app || ui_die "сборка не удалась — ошибка выше"
+
+# ——— сервис и nginx ———
+ui_step "Запуск: systemd + nginx"
+configure_services() {
+  remote "$SUDO bash -s -- $APP_DIR" <<'SH'
+set -euo pipefail
+APP="$1"
+cat > /etc/systemd/system/stonemachine.service <<UNIT
+[Unit]
+Description=STONEMACHINE (Next.js)
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+User=stonemachine
+WorkingDirectory=$APP
+EnvironmentFile=$APP/.env
+Environment=NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
+ExecStart=/usr/bin/env node node_modules/next/dist/bin/next start -p 3000 -H 127.0.0.1
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable stonemachine >/dev/null 2>&1
+systemctl restart stonemachine
+
+set -a; . "$APP/.env"; set +a
+SN="${SITE_ADDRESS:-_}"; case "$SN" in :*|"") SN="_" ;; esac
+cat > /etc/nginx/conf.d/stonemachine.conf <<'NGX'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name __SERVER_NAME__;
+    server_tokens off;
+    client_max_body_size 30m;
+
+    gzip on;
+    gzip_proxied any;
+    gzip_types text/plain text/css text/xml application/json application/javascript application/xml image/svg+xml;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+}
+NGX
+sed -i "s/__SERVER_NAME__/$SN/" /etc/nginx/conf.d/stonemachine.conf
+rm -f /etc/nginx/sites-enabled/default
+nginx -t
+systemctl enable nginx >/dev/null 2>&1
+systemctl reload nginx 2>/dev/null || systemctl restart nginx
+SH
+}
+ui_run "сервис stonemachine и конфиг nginx" configure_services || ui_die "не удалось настроить systemd/nginx"
+
+# HTTPS: если в .env указан домен, а не «:80»
+DOMAIN=$(remote "grep -E '^SITE_ADDRESS=' $APP_DIR/.env | cut -d= -f2-" | tr -d '[:space:]' || true)
+if [[ -n "$DOMAIN" && "$DOMAIN" != :* ]]; then
+  ui_run "HTTPS-сертификат для $DOMAIN (certbot)" remote "export DEBIAN_FRONTEND=noninteractive; $SUDO apt-get install -y -qq certbot python3-certbot-nginx && $SUDO certbot --nginx -d $DOMAIN --non-interactive --agree-tos --register-unsafely-without-email --redirect" \
+    || ui_warn "certbot не справился: проверьте, что A-запись $DOMAIN указывает на $HOST. Сайт пока работает по http"
+fi
 
 ui_step "Ожидание приложения"
-app_healthy() { [[ "$(remote "cd $APP_DIR && $SUDO docker compose ps app --format '{{.Health}}'" 2>/dev/null || true)" == "healthy" ]]; }
-if ! ui_health "контейнер app → healthy" 60 3 app_healthy; then
-  remote "cd $APP_DIR && $SUDO docker compose logs --tail 40 app" || true
+app_healthy() { remote "curl -fsS -o /dev/null http://127.0.0.1/admin/login"; }
+if ! ui_health "сайт отвечает через nginx" 40 3 app_healthy; then
+  remote "$SUDO journalctl -u stonemachine --no-pager -n 40" || true
   ui_die "приложение не стартовало, логи выше"
 fi
 
 # ——— админ ———
-HAS_ADMIN=$(remote "cd $APP_DIR && $SUDO docker compose exec -T app node scripts/create-admin.mjs --count" 2>/dev/null | tr -d '[:space:]' || echo 0)
+HAS_ADMIN=$(remote "cd $APP_DIR && $SUDO node --env-file=.env scripts/create-admin.mjs --count" 2>/dev/null | tr -d '[:space:]' || echo 0)
 if [[ "$HAS_ADMIN" == "0" || $RESET_ADMIN -eq 1 ]]; then
   ui_step "Учётка админки"
   read -rp "Логин админа [admin]: " ADMIN_USER
@@ -161,7 +271,7 @@ if [[ "$HAS_ADMIN" == "0" || $RESET_ADMIN -eq 1 ]]; then
     break
   done
   # Пароль идёт через stdin, а не аргументами — его не видно в списке процессов сервера
-  printf '%s\n' "$P1" | remote "cd $APP_DIR && $SUDO docker compose exec -T -e ADMIN_USERNAME='$ADMIN_USER' app node scripts/create-admin.mjs"
+  printf '%s\n' "$P1" | remote "cd $APP_DIR && $SUDO env ADMIN_USERNAME='$ADMIN_USER' node --env-file=.env scripts/create-admin.mjs"
   unset P1 P2
 fi
 
@@ -174,5 +284,5 @@ if [[ $FIRST_DEPLOY -eq 1 ]]; then
   echo
   ui_dim "Когда появится домен: направьте A-запись на $HOST, затем на сервере в $APP_DIR/.env"
   ui_dim "поставьте SITE_ADDRESS=ваш-домен.ru, SITE_URL=https://ваш-домен.ru, COOKIE_SECURE=true"
-  ui_dim "и запустите ./deploy.sh ещё раз — Caddy сам получит HTTPS-сертификат."
+  ui_dim "и запустите ./deploy.sh ещё раз — certbot выпустит HTTPS-сертификат для nginx."
 fi
