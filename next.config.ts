@@ -15,7 +15,7 @@ const CSP = [
 ].join("; ");
 
 const config: NextConfig = {
-  output: 'standalone'
+  output: 'standalone',
   poweredByHeader: false,
   // Метатеги всегда сразу в <head>, а не стримом: так их гарантированно видят Яндекс, VK, Telegram-превью
   htmlLimitedBots: /.*/,
