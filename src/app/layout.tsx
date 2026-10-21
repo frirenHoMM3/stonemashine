@@ -16,6 +16,9 @@ const mono = JetBrains_Mono({
   variable: "--font-jb",
 });
 
+// Метаданные читают настройки из БД, а при сборке образа БД нет — не пререндерим (в т.ч. /_not-found).
+export const dynamic = "force-dynamic";
+
 export async function generateMetadata(): Promise<Metadata> {
   const s = await getSettings();
   return {
