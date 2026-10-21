@@ -1,0 +1,1 @@
+# Keep this directory so Docker's COPY --from=build /app/public ./public always succeeds.

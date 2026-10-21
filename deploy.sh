@@ -30,6 +30,9 @@ for bin in ssh tar; do command -v "$bin" >/dev/null || ui_die "не найден
 # ——— ввод ———
 ui_title "Деплой STONEMACHINE"
 read -rp "IP сервера: " HOST
+# Убираем случайные пробелы/переносы, которые Windows-терминал может добавить
+HOST="${HOST//[[:space:]]/}"
+HOST="${HOST%$'\r'}"
 [[ "$HOST" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ || "$HOST" =~ ^[0-9a-fA-F:]+$ ]] || ui_die "это не похоже на IP-адрес"
 read -rp "Пользователь SSH [root]: " SSH_USER
 SSH_USER="${SSH_USER:-root}"
@@ -52,7 +55,7 @@ trap cleanup EXIT
 ui_abort_on_signal
 ui_trap_errors
 
-SSH_OPTS=(-p "$SSH_PORT" -o ControlPath="$CTL" -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30)
+SSH_OPTS=(-p "$SSH_PORT" -o ControlPath="$CTL" -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes)
 
 ui_step "Подключение к $SSH_USER@$HOST:$SSH_PORT"
 if [[ -n "$SSH_PASS" ]]; then
@@ -60,11 +63,11 @@ if [[ -n "$SSH_PASS" ]]; then
   printf '#!/bin/sh\nprintf "%%s\\n" "$DEPLOY_SSH_PASS"\n' > "$WORK/askpass"
   chmod 700 "$WORK/askpass"
   DEPLOY_SSH_PASS="$SSH_PASS" SSH_ASKPASS="$WORK/askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 \
-    ssh "${SSH_OPTS[@]}" -o ControlMaster=yes -o ControlPersist=15m -o NumberOfPasswordPrompts=1 \
+    ssh "${SSH_OPTS[@]}" -o ControlMaster=yes -o ControlPersist=2h -o NumberOfPasswordPrompts=1 \
         -o PreferredAuthentications=password,keyboard-interactive -fN "$SSH_USER@$HOST" </dev/null \
     || ui_die "не удалось войти: проверьте IP, пользователя и пароль"
 else
-  ssh "${SSH_OPTS[@]}" -o ControlMaster=yes -o ControlPersist=15m -o BatchMode=yes -fN "$SSH_USER@$HOST" \
+  ssh "${SSH_OPTS[@]}" -o ControlMaster=yes -o ControlPersist=2h -o BatchMode=yes -fN "$SSH_USER@$HOST" \
     || ui_die "вход по ключу не удался. Запустите снова и введите пароль"
 fi
 unset SSH_PASS
@@ -154,10 +157,10 @@ if [[ "$HAS_ADMIN" == "0" || $RESET_ADMIN -eq 1 ]]; then
   ADMIN_USER="${ADMIN_USER:-admin}"
   [[ "$ADMIN_USER" =~ ^[A-Za-z0-9_.-]{3,64}$ ]] || ui_die "логин: 3–64 символа, латиница/цифры/._-"
   while :; do
-    read -rsp "Пароль админа (мин. 10 символов): " P1; echo
+    read -rsp "Пароль админа (мин. 6 символов): " P1; echo
     read -rsp "Повторите: " P2; echo
     [[ "$P1" == "$P2" ]] || { ui_warn "не совпадают"; continue; }
-    [[ ${#P1} -ge 10 ]] || { ui_warn "короче 10 символов"; continue; }
+    [[ ${#P1} -ge 6 ]] || { ui_warn "короче 10 символов"; continue; }
     break
   done
   # Пароль идёт через stdin, а не аргументами — его не видно в списке процессов сервера

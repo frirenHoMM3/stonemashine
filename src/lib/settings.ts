@@ -42,8 +42,14 @@ const DEFAULTS: Settings = {
 };
 
 export const getSettings = cache(async (): Promise<Settings> => {
-  const rows = await db.setting.findMany();
-  const out = { ...DEFAULTS };
-  for (const r of rows) if (r.key in out) out[r.key as SettingKey] = r.value;
-  return out;
+  try {
+    const rows = await db.setting.findMany();
+    const out = { ...DEFAULTS };
+    for (const r of rows) if (r.key in out) out[r.key as SettingKey] = r.value;
+    return out;
+  } catch (error) {
+    // �?��?�?�?��?�?�?��'��' _not-found �? ���?�� ��'�?�?��?��?�? �?��? ��?�?�?�?�?�>�?�?��? �?�� �?��?�?�?��? �?���?�?��?�? �? ? ���?�?�?�?�?�� "next build" ���?�� ��?�?��?��? ? �� (DB ��?��?���?), �?�?�?�? ��? ?�?�?��?�? ���?�?�?��?�� ���?�?�?��.
+    console.warn("getSettings: database unavailable, using defaults", error instanceof Error ? error.message : error);
+    return { ...DEFAULTS };
+  }
 });

@@ -104,7 +104,7 @@ if (( ! NO_DB )); then
   fi
   admins=$(node --env-file-if-exists=.env scripts/create-admin.mjs --count 2>/dev/null | tr -d '[:space:]' || echo "")
   if [[ "$admins" == "0" ]]; then
-    ui_run "админ admin / devadmin-1234" bash -c "printf '%s\n' devadmin-1234 | ADMIN_USERNAME=admin node --env-file-if-exists=.env scripts/create-admin.mjs"
+    ui_run "админ admin / admin123" bash -c "printf '%s\n' admin123 | ADMIN_USERNAME=admin node --env-file-if-exists=.env scripts/create-admin.mjs"
   fi
 fi
 
@@ -134,7 +134,7 @@ db_summary() {
 
 ui_panel "Сервер"
 ui_kv "Сайт"    "http://localhost:$PORT/"
-ui_kv "Админка" "http://localhost:$PORT/admin  (admin / devadmin-1234)"
+ui_kv "Админка" "http://localhost:$PORT/admin  (admin / admin123)"
 ui_kv "Окружение" "development, SITE_URL и cookie настроены под localhost"
 if (( NO_DB )); then ui_kv "База" "не трогаю (--no-db)"; else db_summary; fi
 ui_dim "Ctrl+C — остановить"

@@ -9,8 +9,8 @@ export function PasswordForm() {
       <Field label="Текущий пароль">
         <input name="current" type="password" autoComplete="current-password" required className="field" />
       </Field>
-      <Field label="Новый пароль" hint="Минимум 10 символов">
-        <input name="next" type="password" autoComplete="new-password" required minLength={10} className="field" />
+      <Field label="Новый пароль" hint="Минимум 6 символов">
+        <input name="next" type="password" autoComplete="new-password" required minLength={6} className="field" />
       </Field>
       <Field label="Повторите новый">
         <input name="repeat" type="password" autoComplete="new-password" required className="field" />

@@ -56,10 +56,10 @@ async function main() {
   let password = process.env.ADMIN_PASSWORD;
   if (!password && !stdin.isTTY) password = await readStdin();
   if (!password) {
-    password = await askHidden("Пароль (мин. 10 символов): ");
+    password = await askHidden("Пароль (мин. 6 символов): ");
     if ((await askHidden("Повторите пароль: ")) !== password) throw new Error("Пароли не совпадают");
   }
-  if (password.length < 10) throw new Error("Пароль короче 10 символов");
+  if (password.length < 6) throw new Error("Пароль короче 6 символов");
 
   const db = new PrismaClient();
   try {
